@@ -15,10 +15,12 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 import java.util.List;
 
 @RestController
+@ConditionalOnProperty(name = "node.type", havingValue = "coordinator")
 @RequestMapping("/api/v1/coordinators")
 public class CoordinatorController {
     private final CoordinatorService service;
