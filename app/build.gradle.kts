@@ -11,7 +11,7 @@ plugins {
     java
 }
 
-group = "org.meshdb"
+group = "org.limedb"
 version = "0.0.1-SNAPSHOT"
 
 java {

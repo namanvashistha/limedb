@@ -1,4 +1,4 @@
-package org.meshdb.shard.config;
+package org.limedb.shard.config;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.jdbc.DataSourceBuilder;
@@ -14,10 +14,10 @@ public class ShardDataSourceConfig {
     @Value("${shard.id:1}")
     private String shardId;
 
-    @Value("${spring.datasource.username:meshdb}")
+    @Value("${spring.datasource.username:limedb}")
     private String username;
 
-    @Value("${spring.datasource.password:meshdb}")
+    @Value("${spring.datasource.password:limedb}")
     private String password;
 
     @Value("${spring.datasource.host:localhost}")
@@ -29,7 +29,7 @@ public class ShardDataSourceConfig {
     @Bean
     @Primary
     public DataSource dataSource() {
-        String databaseName = "meshdb_shard_" + shardId;
+        String databaseName = "limedb_shard_" + shardId;
         String url = String.format("jdbc:postgresql://%s:%s/%s", host, port, databaseName);
         
         return DataSourceBuilder.create()

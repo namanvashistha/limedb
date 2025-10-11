@@ -1,4 +1,4 @@
-package org.meshdb.coordinator.core.service;
+package org.limedb.coordinator.core.service;
 
 import org.springframework.stereotype.Service;
 import java.util.List;

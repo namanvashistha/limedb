@@ -1,9 +1,16 @@
-# LimeDB
+<div align="center">
+  <picture>
+    <img alt="LimeDB logo" src="logo/LimeDB_Logo-horizontal.png" height="100">
+  </picture>
+</div>
+<br>
 
-**MeshDB** is a **distributed key-value database** built with **Java 21** and **Spring Boot**.  
+## LimeDB
+
+**LimeDB** is a **distributed key-value database** built with **Java 21** and **Spring Boot**.  
 It features a **coordinator-shard architecture** with **hash-based routing** for horizontal scalability.
 
-MeshDB provides a **Redis-like API** with **PostgreSQL persistence** per shard, making it simple to deploy and scale.
+LimeDB provides a **Redis-like API** with **PostgreSQL persistence** per shard, making it simple to deploy and scale.
 
 ---
 
@@ -29,7 +36,7 @@ MeshDB provides a **Redis-like API** with **PostgreSQL persistence** per shard, 
 ✅ **PostgreSQL Persistence** - Durable storage per shard  
 ✅ **Redis-like API** - GET, SET, DELETE operations  
 ✅ **Coordinator Proxy** - Routes requests to appropriate shards  
-✅ **Dynamic Database Names** - `meshdb_shard_1`, `meshdb_shard_2`, etc.  
+✅ **Dynamic Database Names** - `limedb_shard_1`, `limedb_shard_2`, etc.  
 ✅ **Spring Boot Architecture** - Modern Java framework  
 ✅ **Independent Shard Servers** - Scale by adding more shards  
 ✅ **Clean REST API** - HTTP-based communication  
@@ -59,7 +66,7 @@ MeshDB provides a **Redis-like API** with **PostgreSQL persistence** per shard, 
 |    Shard 1     | |    Shard 2     | |    Shard 3     |
 |  (Port 7001)   | |  (Port 7002)   | |  (Port 7003)   |
 | PostgreSQL DB  | | PostgreSQL DB  | | PostgreSQL DB  |
-|meshdb_shard_1  | |meshdb_shard_2  | |meshdb_shard_3  |
+|limedb_shard_1  | |limedb_shard_2  | |limedb_shard_3  |
 +----------------+ +----------------+ +----------------+
 ```
 
@@ -71,8 +78,8 @@ MeshDB provides a **Redis-like API** with **PostgreSQL persistence** per shard, 
 ## 📦 Project Structure
 
 ```
-meshdb/
-├── app/src/main/java/org/meshdb/
+limedb/
+├── app/src/main/java/org/limedb/
 │   ├── coordinator/
 │   │   ├── config/           # RestTemplate configuration
 │   │   └── core/
@@ -96,7 +103,7 @@ meshdb/
 ### Prerequisites
 - **Java 21**
 - **PostgreSQL 14+** running on localhost:5432
-- **Databases created**: `meshdb_shard_1`, `meshdb_shard_2`, `meshdb_shard_3`
+- **Databases created**: `limedb_shard_1`, `limedb_shard_2`, `limedb_shard_3`
 
 ### 1. Start Shard Servers
 
@@ -169,8 +176,8 @@ curl http://localhost:8080/api/v1/health
 
 ```properties
 # PostgreSQL connection
-spring.datasource.username=meshdb
-spring.datasource.password=meshdb
+spring.datasource.username=limedb
+spring.datasource.password=limedb
 spring.datasource.host=localhost
 spring.datasource.port=5432
 
@@ -191,15 +198,15 @@ spring.jpa.database-platform=org.hibernate.dialect.PostgreSQLDialect
 
 ```sql
 -- Create databases for each shard
-CREATE DATABASE meshdb_shard_1;
-CREATE DATABASE meshdb_shard_2;  
-CREATE DATABASE meshdb_shard_3;
+CREATE DATABASE limedb_shard_1;
+CREATE DATABASE limedb_shard_2;  
+CREATE DATABASE limedb_shard_3;
 
 -- Create user (optional)
-CREATE USER meshdb WITH PASSWORD 'meshdb';
-GRANT ALL PRIVILEGES ON DATABASE meshdb_shard_1 TO meshdb;
-GRANT ALL PRIVILEGES ON DATABASE meshdb_shard_2 TO meshdb;
-GRANT ALL PRIVILEGES ON DATABASE meshdb_shard_3 TO meshdb;
+CREATE USER limedb WITH PASSWORD 'limedb';
+GRANT ALL PRIVILEGES ON DATABASE limedb_shard_1 TO limedb;
+GRANT ALL PRIVILEGES ON DATABASE limedb_shard_2 TO limedb;
+GRANT ALL PRIVILEGES ON DATABASE limedb_shard_3 TO limedb;
 ```
 
 
@@ -302,7 +309,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 💡 Inspiration
 
-MeshDB draws inspiration from:
+LimeDB draws inspiration from:
 - **Redis** - Simple key-value API and operational ease
 - **Cassandra** - Distributed architecture patterns
 - **PostgreSQL** - Reliable ACID storage engine
@@ -310,7 +317,7 @@ MeshDB draws inspiration from:
 
 ---
 
-## 🏆 Why MeshDB?
+## 🏆 Why LimeDB?
 
 - **🚀 Fast to Deploy** - Single JAR, familiar Spring Boot setup
 - **📈 Horizontally Scalable** - Add shards as you grow

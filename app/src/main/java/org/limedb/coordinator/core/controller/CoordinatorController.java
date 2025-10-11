@@ -1,7 +1,7 @@
-package org.meshdb.coordinator.core.controller;
+package org.limedb.coordinator.core.controller;
 
-import org.meshdb.coordinator.core.service.RoutingService;
-import org.meshdb.coordinator.core.service.ShardRegistryService;
+import org.limedb.coordinator.core.service.RoutingService;
+import org.limedb.coordinator.core.service.ShardRegistryService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;

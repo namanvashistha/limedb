@@ -1,4 +1,4 @@
-package org.meshdb.coordinator.core.service;
+package org.limedb.coordinator.core.service;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;

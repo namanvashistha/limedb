@@ -1,4 +1,4 @@
-package org.meshdb.shard.core.repository;
+package org.limedb.shard.core.repository;
 
 import java.util.List;
 import java.util.Optional;

@@ -1,6 +1,6 @@
-package org.meshdb.shard.core.repository.jpa;
+package org.limedb.shard.core.repository.jpa;
 
-import org.meshdb.shard.core.model.Entry;
+import org.limedb.shard.core.model.Entry;
 import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.Optional;
 

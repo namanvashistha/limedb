@@ -1,4 +1,4 @@
-package org.meshdb;
+package org.limedb;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -13,7 +13,7 @@ public class App {
         Environment env = context.getEnvironment();
         String nodeType = env.getProperty("node.type", "coordinator");
 
-        System.out.println("🚀 Starting MeshDB Node Type: " + nodeType.toUpperCase());
+        System.out.println("🚀 Starting LimeDB Node Type: " + nodeType.toUpperCase());
         System.out.println("On Port: " + env.getProperty("server.port", "8080"));
 
         if (nodeType.equalsIgnoreCase("shard")) {

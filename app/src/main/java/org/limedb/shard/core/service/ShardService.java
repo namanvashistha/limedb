@@ -1,6 +1,6 @@
-package org.meshdb.shard.core.service;
+package org.limedb.shard.core.service;
 
-import org.meshdb.shard.core.repository.ShardRepository;
+import org.limedb.shard.core.repository.ShardRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.Optional;

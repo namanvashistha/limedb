@@ -1,7 +1,7 @@
-package org.meshdb.shard.core.controller;
+package org.limedb.shard.core.controller;
 
-import org.meshdb.shard.core.dto.SetRequest;
-import org.meshdb.shard.core.service.ShardService;
+import org.limedb.shard.core.dto.SetRequest;
+import org.limedb.shard.core.service.ShardService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
