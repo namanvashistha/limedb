@@ -1,4 +1,4 @@
-# MeshDB
+# LimeDB
 
 **MeshDB** is a **distributed key-value database** built with **Java 21** and **Spring Boot**.  
 It features a **coordinator-shard architecture** with **hash-based routing** for horizontal scalability.
