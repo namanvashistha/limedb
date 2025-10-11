@@ -6,16 +6,15 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
-
 @Entity
-@Table(name = "shards")
-public class Shard {
+@Table(name = "entries")
+public class Entry {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    private String title;
-    private boolean completed = false;
+    private String key;
+    private String value;
 
     public Long getId() {
         return id;
@@ -23,16 +22,16 @@ public class Shard {
     public void setId(Long id) {
         this.id = id;
     }
-    public String getTitle() {
-        return title;
+    public String getKey() {
+        return key;
     }
-    public void setTitle(String title) {
-        this.title = title;
+    public void setKey(String key) {
+        this.key = key;
     }
-    public boolean isCompleted() {
-        return completed;
+    public String getValue() {
+        return value;
     }
-    public void setCompleted(boolean completed) {
-        this.completed = completed;
+    public void setValue(String value) {
+        this.value = value;
     }
 }

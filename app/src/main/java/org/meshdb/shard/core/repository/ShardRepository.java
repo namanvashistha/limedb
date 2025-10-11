@@ -5,9 +5,7 @@ import java.util.List;
 import java.util.Optional;
 
 public interface ShardRepository {
-    List<Shard> findAll();
-    Optional<Shard> findById(Long id);
-    Shard save(Shard shard);
-    void deleteById(Long id);
-    void markAsCompleted(Long id);
+    Optional<String> get(String key);
+    void set(String key, String value);
+    boolean delete(String key);
 }

@@ -1,27 +1,15 @@
 package org.meshdb.shard.core.controller;
 
-import org.meshdb.shard.core.dto.ShardResponse;
-import org.meshdb.shard.core.dto.ShardRequest;
+import org.meshdb.shard.core.dto.SetRequest;
 import org.meshdb.shard.core.service.ShardService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PatchMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
-import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-
-import java.util.List;
 
 @RestController
 @ConditionalOnProperty(name = "node.type", havingValue = "shard")
-@RequestMapping("/api/v1/shards")
+@RequestMapping("/api/v1")
 public class ShardController {
     private final ShardService service;
 
@@ -29,36 +17,37 @@ public class ShardController {
         this.service = service;
     }
 
-    @GetMapping
-    public List<ShardResponse> getAll() {
-        return service.getAll();
-    }
-
-    @PostMapping
-    public ShardResponse create(@RequestBody ShardRequest request) {
-        return service.create(request);
-    }
-
-    @PatchMapping("/{id}/complete")
-    public ShardResponse markAsCompleted(@PathVariable Long id) {
-        return service.markAsCompleted(id);
-    }
-
-    @ExceptionHandler(RuntimeException.class)
-    public ResponseEntity<String> handleRuntimeException(RuntimeException ex) {
-        if (ex.getMessage() != null && ex.getMessage().contains("Shard not found")) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
+    // GET /get/:key - Get value of a key
+    @GetMapping("/get/{key}")
+    public ResponseEntity<String> get(@PathVariable String key) {
+        String value = service.get(key);
+        if (value != null) {
+            return ResponseEntity.ok(value);
+        } else {
+            return ResponseEntity.notFound().build();
         }
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ex.getMessage());
     }
 
-    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
-    public ResponseEntity<String> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ex.getMessage());
+    // POST /set - Set value of a key
+    @PostMapping("/set")
+    public ResponseEntity<String> set(@RequestBody SetRequest request) {
+        service.set(request.key(), request.value());
+        return ResponseEntity.ok("OK");
     }
 
-    @ExceptionHandler(HttpMessageNotReadableException.class)
-    public ResponseEntity<String> handleInvalidJson(HttpMessageNotReadableException ex) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ex.getMessage());
+    // DELETE /del/:key - Delete a key
+    @DeleteMapping("/del/{key}")
+    public ResponseEntity<String> delete(@PathVariable String key) {
+        boolean deleted = service.delete(key);
+        if (deleted) {
+            return ResponseEntity.ok("1"); // Redis returns 1 for successful deletion
+        } else {
+            return ResponseEntity.ok("0"); // Redis returns 0 for key not found
+        }
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<String> handleException(Exception ex) {
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error: " + ex.getMessage());
     }
 }

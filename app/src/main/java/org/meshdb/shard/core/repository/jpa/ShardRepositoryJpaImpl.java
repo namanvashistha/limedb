@@ -1,13 +1,12 @@
 package org.meshdb.shard.core.repository.jpa;
 
-import org.meshdb.shard.core.model.Shard;
+import org.meshdb.shard.core.model.Entry;
 import org.meshdb.shard.core.repository.ShardRepository;
 import org.springframework.stereotype.Repository;
 
-import java.util.List;
 import java.util.Optional;
 
-@Repository  // Marks this as the actual bean Spring will inject
+@Repository
 public class ShardRepositoryJpaImpl implements ShardRepository {
 
     private final ShardJpaRepository jpaRepository;
@@ -17,32 +16,35 @@ public class ShardRepositoryJpaImpl implements ShardRepository {
     }
 
     @Override
-    public List<Shard> findAll() {
-        return jpaRepository.findAll();
+    public Optional<String> get(String key) {
+        Optional<Entry> entry = jpaRepository.findByKey(key);
+        return entry.map(Entry::getValue);
     }
 
     @Override
-    public Optional<Shard> findById(Long id) {
-        return jpaRepository.findById(id);
-    }
-
-    @Override
-    public Shard save(Shard shard) {
-        return jpaRepository.save(shard);
-    }
-
-    @Override
-    public void deleteById(Long id) {
-        jpaRepository.deleteById(id);
-    }
-
-    @Override
-    public void markAsCompleted(Long id) {
-        Optional<Shard> shardOptional = jpaRepository.findById(id);
-        if (shardOptional.isPresent()) {
-            Shard shard = shardOptional.get();
-            shard.setCompleted(true);
-            jpaRepository.save(shard);
+    public void set(String key, String value) {
+        Optional<Entry> existingEntry = jpaRepository.findByKey(key);
+        if (existingEntry.isPresent()) {
+            // Update existing
+            Entry entry = existingEntry.get();
+            entry.setValue(value);
+            jpaRepository.save(entry);
+        } else {
+            // Create new
+            Entry entry = new Entry();
+            entry.setKey(key);
+            entry.setValue(value);
+            jpaRepository.save(entry);
         }
+    }
+
+    @Override
+    public boolean delete(String key) {
+        Optional<Entry> entry = jpaRepository.findByKey(key);
+        if (entry.isPresent()) {
+            jpaRepository.delete(entry.get());
+            return true;
+        }
+        return false;
     }
 }
