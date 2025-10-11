@@ -10,36 +10,40 @@
 **LimeDB** is a **distributed key-value database** built with **Java 21** and **Spring Boot**.  
 It features a **coordinator-shard architecture** with **hash-based routing** for horizontal scalability.
 
-LimeDB provides a **Redis-like API** with **PostgreSQL persistence** per shard, making it simple to deploy and scale.
+LimeDB currently provides a **Redis-like API** with **PostgreSQL persistence** per shard as a starting point, with plans to evolve into a fully custom storage engine. This makes it simple to deploy and scale while learning distributed systems fundamentals.
 
 ---
 
-## ✅ Project Status
 
-| Feature Area | Status |
-|---------------|--------|
-| Coordinator-Shard Architecture | ✅ **Implemented** |
-| Hash-based Routing (Modulo) | ✅ **Implemented** |
-| Redis-like API (GET/SET/DELETE) | ✅ **Implemented** |
-| PostgreSQL Persistence | ✅ **Implemented** |
-| Dynamic Shard Databases | ✅ **Implemented** |
-| HTTP REST API | ✅ **Implemented** |
-| Consistent Hashing | 🚧 **Planned** |
-| Rebalancing | 🔜 **Future** |
-| Replication & Failover | 🔜 **Future** |
 
----
+## 🛣️ Roadmap
 
-## 🔥 Features (Current Implementation)
+### ✅ Phase 1 (Completed)
+- [x] **Hash-based Routing** - Same key always goes to same shard 
+- [x] **PostgreSQL Persistence** - Durable storage per shard for a start
+- [x] **Redis-like API** - GET, SET, DELETE operations  
+- [x] **Coordinator Proxy** - Routes requests to appropriate shards
+- [x] **Independent Shard Servers** - Scale by adding more shards  
 
-✅ **Hash-based Routing** - Same key always goes to same shard  
-✅ **PostgreSQL Persistence** - Durable storage per shard  
-✅ **Redis-like API** - GET, SET, DELETE operations  
-✅ **Coordinator Proxy** - Routes requests to appropriate shards  
-✅ **Dynamic Database Names** - `limedb_shard_1`, `limedb_shard_2`, etc.  
-✅ **Spring Boot Architecture** - Modern Java framework  
-✅ **Independent Shard Servers** - Scale by adding more shards  
-✅ **Clean REST API** - HTTP-based communication  
+### 🚧 Phase 2: Better Distribution
+- [ ] **Consistent Hashing**: Replace modulo with a proper hash ring
+- [ ] **Health Checks**: Automatic failover when shards go down
+- [ ] **Dynamic Shard Addition/Removal**: Scale shards up and down
+- [ ] **Key Migration & Rebalancing**: Move data when topology changes
+- [ ] **Replication**: Primary-replica setup for high availability
+- [ ] **Metrics**: Monitoring and observability
+
+### 🔮 Phase 3: Custom Storage Engine
+- [ ] **LSM Trees**: Replace PostgreSQL with custom key-value storage
+- [ ] **Memory-Mapped Files**: Direct file system control
+- [ ] **Custom Serialization**: Optimized data formats
+- [ ] **WAL Implementation**: Write-ahead logging from scratch
+
+### ⚡ Phase 4: Advanced Features
+- [ ] **Custom Binary Protocol**: Move beyond HTTP/REST
+- [ ] **Compression**: Custom compression algorithms
+- [ ] **Cache Layers**: Multi-level caching strategies
+- [ ] **Transaction Support**: ACID across multiple shards
 
 ---
 
@@ -212,35 +216,6 @@ GRANT ALL PRIVILEGES ON DATABASE limedb_shard_3 TO limedb;
 
 ---
 
-## 🛣️ Roadmap
-
-### ✅ Phase 1 (Completed)
-- [x] **Coordinator-Shard Architecture**
-- [x] **Hash-based Routing (Modulo)**  
-- [x] **Redis-like API (GET/SET/DELETE)**
-- [x] **PostgreSQL Persistence per Shard**
-- [x] **Dynamic Database Configuration**
-- [x] **HTTP REST Communication**
-
-### 🚧 Phase 2 (Next)
-- [ ] **Consistent Hashing Ring** (replace modulo)
-- [ ] **Health Checks & Failover**
-- [ ] **Metrics & Monitoring**
-- [ ] **Configuration Management**
-
-### � Phase 3 (Future)
-- [ ] **Dynamic Shard Addition/Removal**
-- [ ] **Key Migration & Rebalancing**
-- [ ] **Replication (Primary-Replica)**
-- [ ] **Write-Ahead Log (WAL)**
-
-### ⚡ Phase 4 (Advanced)
-- [ ] **Custom Binary Protocol**
-- [ ] **Client SDKs (Python, Go, Node.js)**
-- [ ] **Admin Dashboard**
-- [ ] **Distributed Transactions**
-
----
 
 ## 🎯 Design Principles
 
@@ -248,7 +223,7 @@ GRANT ALL PRIVILEGES ON DATABASE limedb_shard_3 TO limedb;
 - **Horizontal Scaling** - Add shards to scale storage & throughput  
 - **Predictable Routing** - Same key always goes to same shard
 - **Operational Simplicity** - Easy to deploy and monitor
-- **Database Agnostic** - Currently PostgreSQL, easily replaceable
+- **Storage Evolution** - Start with PostgreSQL, evolve to custom engines
 
 ---
 
