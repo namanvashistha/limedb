@@ -30,9 +30,9 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0")
 
-    // Optional database layer (in-memory)
+    // Database layer with PostgreSQL
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
-    runtimeOnly("com.h2database:h2")
+    runtimeOnly("org.postgresql:postgresql")
 
     // Test dependencies
     testImplementation("org.springframework.boot:spring-boot-starter-test")
