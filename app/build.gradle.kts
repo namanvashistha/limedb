@@ -6,38 +6,38 @@
  */
 
 plugins {
-    // Apply the application plugin to add support for building a CLI application in Java.
-    application
+    id("org.springframework.boot") version "3.5.6"
+    id("io.spring.dependency-management") version "1.1.6"
+    java
+}
+
+group = "org.meshdb"
+version = "0.0.1-SNAPSHOT"
+
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(21))
+    }
 }
 
 repositories {
-    // Use Maven Central for resolving dependencies.
     mavenCentral()
 }
 
 dependencies {
-    // Use JUnit Jupiter for testing.
-    testImplementation(libs.junit.jupiter)
+    // Core Spring Boot dependencies
+    implementation("org.springframework.boot:spring-boot-starter-web")
+    implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0")
 
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    // Optional database layer (in-memory)
+    implementation("org.springframework.boot:spring-boot-starter-data-jpa")
+    runtimeOnly("com.h2database:h2")
 
-    // This dependency is used by the application.
-    implementation(libs.guava)
+    // Test dependencies
+    testImplementation("org.springframework.boot:spring-boot-starter-test")
 }
 
-// Apply a specific Java toolchain to ease working on different environments.
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
-    }
-}
-
-application {
-    // Define the main class for the application.
-    mainClass = "org.meshdb.App"
-}
-
-tasks.named<Test>("test") {
-    // Use JUnit Platform for unit tests.
+tasks.withType<Test> {
     useJUnitPlatform()
 }
