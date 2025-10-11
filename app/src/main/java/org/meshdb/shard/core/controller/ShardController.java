@@ -8,8 +8,8 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 @RestController
-@ConditionalOnProperty(name = "node.type", havingValue = "shard")
 @RequestMapping("/api/v1")
+@ConditionalOnProperty(name = "node.type", havingValue = "shard")
 public class ShardController {
     private final ShardService service;
 

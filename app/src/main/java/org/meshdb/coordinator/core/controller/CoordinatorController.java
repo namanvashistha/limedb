@@ -10,8 +10,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import java.util.Map;
 
 @RestController
-@ConditionalOnProperty(name = "node.type", havingValue = "coordinator")
 @RequestMapping("/api/v1")
+@ConditionalOnProperty(name = "node.type", havingValue = "coordinator")
 public class CoordinatorController {
     
     @Autowired
