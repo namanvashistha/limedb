@@ -1,17 +1,17 @@
-package org.limedb.shard.core.repository.jpa;
+package org.limedb.node.core.repository.jpa;
 
-import org.limedb.shard.core.model.Entry;
-import org.limedb.shard.core.repository.ShardRepository;
+import org.limedb.node.core.model.Entry;
+import org.limedb.node.core.repository.NodeRepository;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
 
 @Repository
-public class ShardRepositoryJpaImpl implements ShardRepository {
+public class NodeRepositoryJpaImpl implements NodeRepository {
 
-    private final ShardJpaRepository jpaRepository;
+    private final NodeJpaRepository jpaRepository;
 
-    public ShardRepositoryJpaImpl(ShardJpaRepository jpaRepository) {
+    public NodeRepositoryJpaImpl(NodeJpaRepository jpaRepository) {
         this.jpaRepository = jpaRepository;
     }
 

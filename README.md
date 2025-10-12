@@ -8,173 +8,174 @@
 ## LimeDB
 
 **LimeDB** is a **distributed key-value database** built with **Java 21** and **Spring Boot**.  
-It features a **coordinator-shard architecture** with **hash-based routing** for horizontal scalability.
+It features a **peer-to-peer architecture** with **hash-based routing** for horizontal scalability.
 
-LimeDB currently provides a **Redis-like API** with **PostgreSQL persistence** per shard as a starting point, with plans to evolve into a fully custom storage engine. This makes it simple to deploy and scale while learning distributed systems fundamentals.
+LimeDB currently provides a **Redis-like API** with **PostgreSQL persistence** per node as a starting point, with plans to evolve into a fully custom storage engine. Each node can handle client requests and automatically route them to the correct peer, making it simple to deploy and scale while learning distributed systems fundamentals.
 
 ---
 
 
 
-## 🛣️ Roadmap
+## Roadmap
 
-### ✅ Phase 1 (Completed)
-- [x] **Hash-based Routing** - Same key always goes to same shard 
-- [x] **PostgreSQL Persistence** - Durable storage per shard for a start
-- [x] **Redis-like API** - GET, SET, DELETE operations  
-- [x] **Coordinator Proxy** - Routes requests to appropriate shards
-- [x] **Independent Shard Servers** - Scale by adding more shards  
+### **Phase 1 Complete:** Basic peer-to-peer key-value store
+- [x] Hash-based routing with automatic request forwarding
+- [x] 1-based node IDs for user clarity  
+- [x] RESTful API with GET/SET/DELETE operations
+- [x] Cluster state monitoring endpoint
+- [x] PostgreSQL as transitional storage backend
+- [x] Concurrent testing capabilities with performance metrics
 
-### 🚧 Phase 2: Better Distribution
+### Phase 2: Better Distribution
 - [ ] **Consistent Hashing**: Replace modulo with a proper hash ring
-- [ ] **Health Checks**: Automatic failover when shards go down
-- [ ] **Dynamic Shard Addition/Removal**: Scale shards up and down
+- [ ] **Health Checks**: Automatic failover when nodes go down
+- [ ] **Dynamic Node Addition/Removal**: Scale nodes up and down
 - [ ] **Key Migration & Rebalancing**: Move data when topology changes
 - [ ] **Replication**: Primary-replica setup for high availability
 - [ ] **Metrics**: Monitoring and observability
 
-### 🔮 Phase 3: Custom Storage Engine
+### Phase 3: Custom Storage Engine
 - [ ] **LSM Trees**: Replace PostgreSQL with custom key-value storage
 - [ ] **Memory-Mapped Files**: Direct file system control
 - [ ] **Custom Serialization**: Optimized data formats
 - [ ] **WAL Implementation**: Write-ahead logging from scratch
 
-### ⚡ Phase 4: Advanced Features
+### Phase 4: Advanced Features
 - [ ] **Custom Binary Protocol**: Move beyond HTTP/REST
 - [ ] **Compression**: Custom compression algorithms
 - [ ] **Cache Layers**: Multi-level caching strategies
-- [ ] **Transaction Support**: ACID across multiple shards
+- [ ] **Transaction Support**: ACID across multiple nodes
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
-                    +----------------+
-                    |   Client App   |
-                    +-------+--------+
-                            |
-                            | HTTP REST API
-                            |
-                    +-------v--------+
-                    |  Coordinator   |
-                    |  (Port 8080)   |
-                    | Hash Routing   |
-                    +-------+--------+
-                            |
-        +-----------+-------+-------+-----------+
-        |                   |                   |
-        | HTTP              | HTTP              | HTTP
-        |                   |                   |
-+-------v--------+ +-------v--------+ +-------v--------+
-|    Shard 1     | |    Shard 2     | |    Shard 3     |
-|  (Port 7001)   | |  (Port 7002)   | |  (Port 7003)   |
-| PostgreSQL DB  | | PostgreSQL DB  | | PostgreSQL DB  |
-|limedb_shard_1  | |limedb_shard_2  | |limedb_shard_3  |
-+----------------+ +----------------+ +----------------+
+         Client App
+              |
+              | Can connect to ANY node
+              |
+    +---------+---------+---------+
+    |         |         |         |
+    v         v         v         v
++-------+  +-------+  +-------+
+| Node 1|  | Node 2|  | Node 3|  
+|:7001  |  |:7002  |  |:7003  |  
+|       |  |       |  |       |  
+| Routes|<-| Routes|<-| Routes|  Each node can:
+| to    |->| to    |->| to    |  - Handle requests locally
+| peers |  | peers |  | peers |  - Route to correct peer
+|       |  |       |  |       |  - No single point of failure
++-------+  +-------+  +-------+
+|  DB   |  |  DB   |  |  DB   |
+|node_1|  |node_2|  |node_3|
++-------+  +-------+  +-------+
 ```
 
 **Routing Logic:**  
-`hash(key) % num_shards = shard_index`
+```java
+targetNodeId = (hash(key) % totalNodes) + 1  // Returns 1, 2, 3...
+if (targetNodeId == myNodeId) handleLocally();
+else forwardToNode(peers.get(targetNodeId - 1));
+```
 
 ---
 
-## 📦 Project Structure
+## Project Structure
 
 ```
 limedb/
 ├── app/src/main/java/org/limedb/
-│   ├── coordinator/
-│   │   ├── config/           # RestTemplate configuration
-│   │   └── core/
-│   │       ├── controller/   # Coordinator REST API
-│   │       └── service/      # Routing & Shard Registry
-│   └── shard/
-│       ├── config/           # Database configuration
+│   ├── App.java              # Main Spring Boot application
+│   └── node/
+│       ├── config/           # Database & RestTemplate configuration
 │       └── core/
-│           ├── controller/   # Shard REST API
+│           ├── controller/   # Node REST API (peer-to-peer)
+│           ├── dto/          # Data transfer objects
 │           ├── model/        # Entry (key-value) entity
 │           ├── repository/   # JPA repositories
-│           └── service/      # Shard business logic
-├── scripts/                  # Python test scripts
+│           └── service/      # Node business logic & routing
 └── README.md
 ```
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 - **Java 21**
 - **PostgreSQL 14+** running on localhost:5432
-- **Databases created**: `limedb_shard_1`, `limedb_shard_2`, `limedb_shard_3`
-
-### 1. Start Shard Servers
+- **Databases created**: `limedb_node_1`, `limedb_node_2`, `limedb_node_3`
 
 ```bash
-# Terminal 1: Shard 1
-./gradlew bootRun --args='--node.type=shard --server.port=7001 --shard.id=1'
-
-# Terminal 2: Shard 2  
-./gradlew bootRun --args='--node.type=shard --server.port=7002 --shard.id=2'
-
-# Terminal 3: Shard 3
-./gradlew bootRun --args='--node.type=shard --server.port=7003 --shard.id=3'
+# Quick database setup
+./setup-postgres.sh
 ```
 
-### 2. Start Coordinator
+### 1. Start Peer Nodes
 
 ```bash
-# Terminal 4: Coordinator
-./gradlew bootRun --args='--node.type=coordinator --server.port=8080'
+# Terminal 1: Node 1
+./gradlew bootRun --args='--server.port=7001 --node.id=1'
+
+# Terminal 2: Node 2  
+./gradlew bootRun --args='--server.port=7002 --node.id=2'
+
+# Terminal 3: Node 3
+./gradlew bootRun --args='--server.port=7003 --node.id=3'
 ```
 
-### 3. Test the API
+### 2. Test the API (Connect to ANY node)
 
+**Single Request:**
 ```bash
-# SET a key-value pair (routes to appropriate shard)
-curl -X POST http://localhost:8080/api/v1/set \
+# Set a value (routes to appropriate node automatically)
+curl -X POST http://localhost:7001/api/v1/set \
   -H "Content-Type: application/json" \
-  -d '{"key": "user:123", "value": "Alice"}'
+  -d '{"key": "user:123", "value": "John Doe"}'
 
-# GET the value (routes to same shard)
-curl http://localhost:8080/api/v1/get/user:123
+# Get a value (can query any node)
+curl http://localhost:7001/api/v1/get/user:123
 
-# DELETE the key
-curl -X DELETE http://localhost:8080/api/v1/del/user:123
+# Delete a value (routes to correct node)
+curl -X DELETE http://localhost:7001/api/v1/del/user:123
 
-# Check coordinator health
-curl http://localhost:8080/api/v1/health
+# Check cluster state (shows all active nodes)
+curl http://localhost:7001/cluster/state
+```
+
+**Concurrent Load Testing:**
+```bash
+cd scripts
+# Concurrent testing with multiple workers
+python bulk_set.py
 ```
 
 
 ---
 
-## 📡 API Reference
+## API Reference
 
-### Coordinator API (Port 8080)
+### Node API (Any Port - 7001, 7002, 7003)
 
 | Method | Endpoint | Description | Example |
 |--------|----------|-------------|---------|
 | `POST` | `/api/v1/set` | Store key-value pair | `{"key": "user:1", "value": "Alice"}` |
 | `GET` | `/api/v1/get/{key}` | Retrieve value by key | `/api/v1/get/user:1` |
 | `DELETE` | `/api/v1/del/{key}` | Delete key | `/api/v1/del/user:1` |
-| `GET` | `/api/v1/health` | Coordinator status | Shows shard count & URLs |
+| `GET` | `/cluster/state` | Node cluster info | Shows node ID, peers, and status |
 
-### Shard API (Ports 7001-7003)
+### Peer-to-Peer Behavior
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/v1/set` | Direct shard storage |
-| `GET` | `/api/v1/get/{key}` | Direct shard retrieval |
-| `DELETE` | `/api/v1/del/{key}` | Direct shard deletion |
-
-**Note:** Normally you'd only use the Coordinator API. Direct shard access is for debugging.
+- **Connect to ANY node**: All nodes expose the same API
+- **Automatic routing**: Requests are automatically forwarded to the correct node
+- **No single point of failure**: If one node is down, use another
+- **Transparent**: Client doesn't need to know which node has the data
 
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 ### Application Properties
 
@@ -188,40 +189,50 @@ spring.datasource.port=5432
 # JPA Configuration  
 spring.jpa.hibernate.ddl-auto=update
 spring.jpa.database-platform=org.hibernate.dialect.PostgreSQLDialect
+
+# Peer-to-Peer Configuration
+node.id=1
+node.peers=http://localhost:7001,http://localhost:7002,http://localhost:7003
 ```
 
 ### Runtime Parameters
 
 | Parameter | Description | Example |
 |-----------|-------------|---------|
-| `--node.type` | Node type (coordinator/shard) | `--node.type=shard` |
-| `--server.port` | HTTP port | `--server.port=7001` |
-| `--shard.id` | Shard identifier | `--shard.id=1` |
+| `--server.port` | HTTP port for this node | `--server.port=7001` |
+| `--node.id` | Node identifier (1-based) | `--node.id=1` |
+| `--node.peers` | Comma-separated peer URLs | `--node.peers=http://localhost:7001,http://localhost:7002` |
 
 ### Database Setup
 
+**Automatic Setup:**
+```bash
+./setup-postgres.sh
+```
+
+**Manual Setup:**
 ```sql
--- Create databases for each shard
-CREATE DATABASE limedb_shard_1;
-CREATE DATABASE limedb_shard_2;  
-CREATE DATABASE limedb_shard_3;
+-- Create databases for each node
+CREATE DATABASE limedb_node_1;
+CREATE DATABASE limedb_node_2;  
+CREATE DATABASE limedb_node_3;
 
 -- Create user (optional)
 CREATE USER limedb WITH PASSWORD 'limedb';
-GRANT ALL PRIVILEGES ON DATABASE limedb_shard_1 TO limedb;
-GRANT ALL PRIVILEGES ON DATABASE limedb_shard_2 TO limedb;
-GRANT ALL PRIVILEGES ON DATABASE limedb_shard_3 TO limedb;
+GRANT ALL PRIVILEGES ON DATABASE limedb_node_1 TO limedb;
+GRANT ALL PRIVILEGES ON DATABASE limedb_node_2 TO limedb;
+GRANT ALL PRIVILEGES ON DATABASE limedb_node_3 TO limedb;
 ```
 
 
 ---
 
 
-## 🎯 Design Principles
+## Design Principles
 
 - **Simplicity First** - Start simple, evolve to complex
-- **Horizontal Scaling** - Add shards to scale storage & throughput  
-- **Predictable Routing** - Same key always goes to same shard
+- **Horizontal Scaling** - Add nodes to scale storage & throughput  
+- **Predictable Routing** - Same key always goes to same node
 - **Operational Simplicity** - Easy to deploy and monitor
 - **Storage Evolution** - Start with PostgreSQL, evolve to custom engines
 
@@ -233,12 +244,12 @@ GRANT ALL PRIVILEGES ON DATABASE limedb_shard_3 TO limedb;
 |-----------|------------|---------|
 | **Language** | Java 21 | Modern JVM with performance improvements |
 | **Framework** | Spring Boot 3.5.6 | Web framework & dependency injection |
-| **Database** | PostgreSQL 14+ | Persistent storage per shard |
+| **Database** | PostgreSQL 14+ | Persistent storage per node |
 | **ORM** | JPA/Hibernate | Database mapping & operations |
 | **Build** | Gradle | Build automation & dependency management |
-| **Architecture** | Coordinator-Shard | Distributed system pattern |
+| **Architecture** | Peer-to-Peer | Distributed system pattern |
 | **Routing** | Hash + Modulo | Simple deterministic routing |
-| **Communication** | HTTP REST | Inter-service communication |
+| **Communication** | HTTP REST | Inter-node communication |
 
 
 ---
@@ -247,13 +258,13 @@ GRANT ALL PRIVILEGES ON DATABASE limedb_shard_3 TO limedb;
 
 ### Manual Testing
 ```bash
-# Test hash routing - same key goes to same shard
-curl -X POST http://localhost:8080/api/v1/set -H "Content-Type: application/json" -d '{"key": "test1", "value": "shard_test"}'
-curl http://localhost:8080/api/v1/get/test1  # Should return "shard_test"
+# Test hash routing - same key goes to same node
+curl -X POST http://localhost:8080/api/v1/set -H "Content-Type: application/json" -d '{"key": "test1", "value": "node_test"}'
+curl http://localhost:8080/api/v1/get/test1  # Should return "node_test"
 
-# Test persistence - restart shards and data should remain
+# Test persistence - restart nodes and data should remain
 curl -X POST http://localhost:8080/api/v1/set -H "Content-Type: application/json" -d '{"key": "persist", "value": "data"}'
-# Restart shard servers
+# Restart node servers
 curl http://localhost:8080/api/v1/get/persist  # Should still return "data"
 ```
 
@@ -261,12 +272,12 @@ curl http://localhost:8080/api/v1/get/persist  # Should still return "data"
 ```bash
 # Check coordinator health
 curl http://localhost:8080/api/v1/health
-# Returns: {"status":"healthy","type":"coordinator","shardCount":3,"shards":["http://localhost:7001","http://localhost:7002","http://localhost:7003"]}
+# Returns: {"status":"healthy","type":"coordinator","nodeCount":3,"nodes":["http://localhost:7001","http://localhost:7002","http://localhost:7003"]}
 ```
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 1. **Fork the repository**
 2. **Create a feature branch** (`git checkout -b feature/amazing-feature`)
@@ -276,13 +287,13 @@ curl http://localhost:8080/api/v1/health
 
 ---
 
-## 📜 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
-## 💡 Inspiration
+## Inspiration
 
 LimeDB draws inspiration from:
 - **Redis** - Simple key-value API and operational ease
@@ -292,13 +303,13 @@ LimeDB draws inspiration from:
 
 ---
 
-## 🏆 Why LimeDB?
+##  Why LimeDB?
 
-- **🚀 Fast to Deploy** - Single JAR, familiar Spring Boot setup
-- **📈 Horizontally Scalable** - Add shards as you grow
-- **💾 Durable** - PostgreSQL persistence with ACID guarantees
-- **🔍 Predictable** - Hash-based routing, same key → same shard
-- **🛠️ Developer Friendly** - REST API, familiar tools
-- **🔧 Extensible** - Clean architecture for future enhancements
+- **Fast to Deploy** - Single JAR, familiar Spring Boot setup
+- **Horizontally Scalable** - Add nodes as you grow
+- **Durable** - PostgreSQL persistence with ACID guarantees
+- **Predictable** - Hash-based routing, same key → same node
+- **Developer Friendly** - REST API, familiar tools
+- **Extensible** - Clean architecture for future enhancements
 
 **Ready to scale your key-value storage?** ⭐ Star the repo and get started!

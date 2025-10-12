@@ -1,0 +1,3 @@
+- https://hazelcast.com/foundations/distributed-computing/cap-theorem/
+- https://www.julianbrowne.com/article/brewers-cap-theorem/
+- https://www.julianbrowne.com/

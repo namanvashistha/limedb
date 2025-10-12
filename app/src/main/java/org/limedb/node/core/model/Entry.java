@@ -1,4 +1,4 @@
-package org.limedb.shard.core.model;
+package org.limedb.node.core.model;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;

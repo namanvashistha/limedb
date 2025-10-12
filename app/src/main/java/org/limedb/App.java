@@ -11,17 +11,14 @@ public class App {
         ConfigurableApplicationContext context = SpringApplication.run(App.class, args);
 
         Environment env = context.getEnvironment();
-        String nodeType = env.getProperty("node.type", "coordinator");
+        String nodeId = env.getProperty("node.id", "1");
+        String serverPort = env.getProperty("server.port", "7001");
+        String peerUrls = env.getProperty("node.peers", "");
 
-        System.out.println("🚀 Starting LimeDB Node Type: " + nodeType.toUpperCase());
-        System.out.println("On Port: " + env.getProperty("server.port", "8080"));
-
-        if (nodeType.equalsIgnoreCase("shard")) {
-            System.out.println("Running Shard Server...");
-        } else if (nodeType.equalsIgnoreCase("coordinator")) {
-            System.out.println("Running Coordinator Server...");
-        } else {
-            throw new IllegalArgumentException("Invalid node.type: " + nodeType);
-        }
+        System.out.println("🚀 Starting LimeDB Peer-to-Peer Node");
+        System.out.println("Node ID: " + nodeId);
+        System.out.println("Port: " + serverPort);
+        System.out.println("Peers: " + peerUrls);
+        System.out.println("Running in Peer-to-Peer mode - can handle requests and route to other nodes");
     }
 }
