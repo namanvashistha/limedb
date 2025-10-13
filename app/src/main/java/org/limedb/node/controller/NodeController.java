@@ -2,6 +2,7 @@ package org.limedb.node.controller;
 
 import org.limedb.node.dto.SetRequest;
 import org.limedb.node.service.NodeService;
+import org.limedb.node.routing.RoutingService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -14,6 +15,7 @@ import java.util.Map;
 @RequestMapping("/api/v1")
 public class NodeController {
     private final NodeService service;
+    private final RoutingService routingService;
     
     @Autowired
     private int nodeId;
@@ -21,8 +23,9 @@ public class NodeController {
     @Autowired
     private List<String> peerUrls;
 
-    public NodeController(NodeService service) {
+    public NodeController(NodeService service, RoutingService routingService) {
         this.service = service;
+        this.routingService = routingService;
     }
 
     // GET /get/:key - Get value of a key (with peer-to-peer routing)
@@ -67,6 +70,20 @@ public class NodeController {
             "totalNodes", peerUrls.size(),
             "status", "active"
         ));
+    }
+
+    // GET /cluster/ring - Show consistent hash ring statistics
+    @GetMapping("/cluster/ring")
+    public ResponseEntity<Map<String, Object>> ringState() {
+        try {
+            Map<String, Object> ringStats = routingService.getRingStatistics();
+            ringStats.put("currentNode", routingService.getCurrentNodeUrl());
+            ringStats.put("allNodes", routingService.getAllNodes());
+            return ResponseEntity.ok(ringStats);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", e.getMessage()));
+        }
     }
 
     @ExceptionHandler(Exception.class)

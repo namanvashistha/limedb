@@ -2,6 +2,7 @@ package org.limedb.node.service;
 
 import org.limedb.node.dto.SetRequest;
 import org.limedb.node.repository.NodeRepository;
+import org.limedb.node.routing.RoutingService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -15,6 +16,7 @@ import java.util.Optional;
 public class NodeService {
 
     private final NodeRepository repository;
+    private final RoutingService routingService;
     
     @Autowired
     private int nodeId;
@@ -25,13 +27,30 @@ public class NodeService {
     @Autowired
     private RestTemplate restTemplate;
 
-    public NodeService(NodeRepository repository) {
+    public NodeService(NodeRepository repository, RoutingService routingService) {
         this.repository = repository;
+        this.routingService = routingService;
     }
 
     /**
-     * Determine which node should handle the given key (1-based)
+     * Get the target node URL for the given key using consistent hashing
      */
+    public String getTargetNodeUrl(String key) {
+        return routingService.getTargetNodeUrl(key);
+    }
+
+    /**
+     * Check if this node should handle the request locally using consistent hashing
+     */
+    public boolean shouldHandleLocally(String key) {
+        return routingService.shouldHandleLocally(key);
+    }
+
+    /**
+     * Legacy method for backward compatibility - determines which node should handle the given key (1-based)
+     * @deprecated Use getTargetNodeUrl() and consistent hashing instead
+     */
+    @Deprecated
     public int getTargetNodeId(String key) {
         if (peerUrls == null || peerUrls.isEmpty()) {
             throw new RuntimeException("No peers configured");
@@ -40,13 +59,6 @@ public class NodeService {
         // Use simple modulo-based routing with String.hashCode()
         // Convert from 0-based to 1-based: Node 1, 2, 3...
         return (Math.abs(key.hashCode()) % peerUrls.size()) + 1;
-    }
-
-    /**
-     * Check if this node should handle the request locally
-     */
-    public boolean shouldHandleLocally(String key) {
-        return getTargetNodeId(key) == nodeId;
     }
 
     /**
@@ -112,11 +124,9 @@ public class NodeService {
         return deleteLocal(key);
     }
 
-    // Peer forwarding methods
+    // Peer forwarding methods using consistent hashing
     private ResponseEntity<String> forwardGet(String key) {
-        int targetNodeId = getTargetNodeId(key);
-        // Convert 1-based nodeId to 0-based array index
-        String targetUrl = peerUrls.get(targetNodeId - 1);
+        String targetUrl = getTargetNodeUrl(key);
         
         try {
             return restTemplate.getForEntity(
@@ -129,9 +139,7 @@ public class NodeService {
     }
 
     private ResponseEntity<String> forwardSet(String key, String value) {
-        int targetNodeId = getTargetNodeId(key);
-        // Convert 1-based nodeId to 0-based array index
-        String targetUrl = peerUrls.get(targetNodeId - 1);
+        String targetUrl = getTargetNodeUrl(key);
         
         try {
             SetRequest request = new SetRequest(key, value);
@@ -146,9 +154,7 @@ public class NodeService {
     }
 
     private ResponseEntity<String> forwardDelete(String key) {
-        int targetNodeId = getTargetNodeId(key);
-        // Convert 1-based nodeId to 0-based array index
-        String targetUrl = peerUrls.get(targetNodeId - 1);
+        String targetUrl = getTargetNodeUrl(key);
         
         try {
             return restTemplate.exchange(
