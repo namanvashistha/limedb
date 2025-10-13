@@ -1,4 +1,4 @@
-package org.limedb.node.core.model;
+package org.limedb.node.model;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;

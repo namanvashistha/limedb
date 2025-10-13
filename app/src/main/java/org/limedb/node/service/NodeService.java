@@ -1,7 +1,7 @@
-package org.limedb.node.core.service;
+package org.limedb.node.service;
 
-import org.limedb.node.core.dto.SetRequest;
-import org.limedb.node.core.repository.NodeRepository;
+import org.limedb.node.dto.SetRequest;
+import org.limedb.node.repository.NodeRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;

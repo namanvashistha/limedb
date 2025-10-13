@@ -1,3 +1,3 @@
-package org.limedb.node.core.dto;
+package org.limedb.node.dto;
 
 public record NodeRequest(String title, boolean completed) {}

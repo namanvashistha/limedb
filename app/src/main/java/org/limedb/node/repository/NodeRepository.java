@@ -1,4 +1,4 @@
-package org.limedb.node.core.repository;
+package org.limedb.node.repository;
 
 import java.util.List;
 import java.util.Optional;

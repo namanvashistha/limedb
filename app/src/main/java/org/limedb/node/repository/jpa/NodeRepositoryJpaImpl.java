@@ -1,7 +1,7 @@
-package org.limedb.node.core.repository.jpa;
+package org.limedb.node.repository.jpa;
 
-import org.limedb.node.core.model.Entry;
-import org.limedb.node.core.repository.NodeRepository;
+import org.limedb.node.model.Entry;
+import org.limedb.node.repository.NodeRepository;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;

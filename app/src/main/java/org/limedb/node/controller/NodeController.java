@@ -1,7 +1,7 @@
-package org.limedb.node.core.controller;
+package org.limedb.node.controller;
 
-import org.limedb.node.core.dto.SetRequest;
-import org.limedb.node.core.service.NodeService;
+import org.limedb.node.dto.SetRequest;
+import org.limedb.node.service.NodeService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
