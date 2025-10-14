@@ -8,9 +8,9 @@
 ## LimeDB
 
 **LimeDB** is a **distributed key-value database** built with **Java 21** and **Spring Boot**.  
-It features a **peer-to-peer architecture** with **hash-based routing** for horizontal scalability.
+It implements core distributed systems concepts including **consistent hashing with virtual nodes**, **peer-to-peer routing**, **automatic failover**, **consensus protocols**, and **dynamic rebalancing** for horizontal scalability.
 
-LimeDB currently provides a **Redis-like API** with **PostgreSQL persistence** per node as a starting point, with plans to evolve into a fully custom storage engine. Each node can handle client requests and automatically route them to the correct peer, making it simple to deploy and scale while learning distributed systems fundamentals.
+Built as a hands-on learning platform for distributed systems fundamentals, LimeDB features a complete **hash ring implementation** with performance optimization, comprehensive monitoring, and a clear evolution path from PostgreSQL persistence through gossip protocols to custom LSM tree storage engines.
 
 ---
 
@@ -20,31 +20,44 @@ LimeDB currently provides a **Redis-like API** with **PostgreSQL persistence** p
 
 ### **Phase 1 Complete:** Basic peer-to-peer key-value store
 - [x] Hash-based routing with automatic request forwarding
-- [x] 1-based node IDs for user clarity  
-- [x] RESTful API with GET/SET/DELETE operations
+- [x] API with GET/SET/DELETE operations
 - [x] Cluster state monitoring endpoint
 - [x] PostgreSQL as transitional storage backend
 - [x] Concurrent testing capabilities with performance metrics
 
-### Phase 2: Better Distribution
-- [ ] **Consistent Hashing**: Replace modulo with a proper hash ring
-- [ ] **Health Checks**: Automatic failover when nodes go down
-- [ ] **Dynamic Node Addition/Removal**: Scale nodes up and down
-- [ ] **Key Migration & Rebalancing**: Move data when topology changes
-- [ ] **Replication**: Primary-replica setup for high availability
-- [ ] **Metrics**: Monitoring and observability
+### **Phase 2 In-Progress:** Consistent Hashing & Performance Analysis
+- [x] **Consistent Hashing**: Full hash ring implementation with virtual nodes
+- [x] **Hash Ring Visualization**: 360-degree ranges for easy debugging
+- [x] **Database Indexing**: Optimized key lookups with unique constraints
+- [x] **Performance Analysis**: Load testing with 15K+ concurrent requests
+- [x] **Connection Pool Analysis**: RestTemplate bottleneck identification
+- [x] **Comprehensive Logging**: File-based logging with rotation policies
+- [x] **Ring Statistics API**: Real-time hash ring monitoring and distribution metrics
 
-### Phase 3: Custom Storage Engine
+### Phase 3: Production Readiness
+- [ ] **Connection Pool Optimization**: Custom RestTemplate configuration for high concurrency
+- [ ] **Binary Internode Communication**: Move beyond HTTP/REST with gRPC/protobuf
+- [ ] **Gossip Protocol**: Node discovery, failure detection, cluster membership, and topology changes
+- [ ] **Health Checks**: Automatic failover when nodes go down
+- [ ] **Dynamic Node Addition/Removal**: Scale nodes up and down with automatic rebalancing
+- [ ] **Key Migration & Rebalancing**: Move data when topology changes
+- [ ] **Replication Factor Support**: Consecutive N nodes in the ring for replication
+- [ ] **Circuit Breakers**: Fault tolerance patterns for inter-node communication
+
+### Phase 4: Custom Storage Engine
 - [ ] **LSM Trees**: Replace PostgreSQL with custom key-value storage
 - [ ] **Memory-Mapped Files**: Direct file system control
 - [ ] **Custom Serialization**: Optimized data formats
 - [ ] **WAL Implementation**: Write-ahead logging from scratch
+- [ ] **Compaction Strategies**: Background merge operations for LSM efficiency
 
-### Phase 4: Advanced Features
-- [ ] **Custom Binary Protocol**: Move beyond HTTP/REST
+### Phase 5: Advanced Features
+- [ ] **Advanced Gossip Features**: Anti-entropy, vector clocks, conflict resolution
 - [ ] **Compression**: Custom compression algorithms
 - [ ] **Cache Layers**: Multi-level caching strategies
 - [ ] **Transaction Support**: ACID across multiple nodes
+- [ ] **Read Replicas**: Separate read and write workloads
+- [ ] **Cross-Datacenter Replication**: Geographic distribution
 
 ---
 
@@ -72,11 +85,17 @@ LimeDB currently provides a **Redis-like API** with **PostgreSQL persistence** p
 +-------+  +-------+  +-------+
 ```
 
-**Routing Logic:**  
+**Routing Logic (Consistent Hashing):**  
 ```java
-targetNodeId = (hash(key) % totalNodes) + 1  // Returns 1, 2, 3...
-if (targetNodeId == myNodeId) handleLocally();
-else forwardToNode(peers.get(targetNodeId - 1));
+// Virtual nodes for better distribution (150 per physical node)
+String targetNode = consistentHashRing.getNode(key);
+if (targetNode.equals(currentNodeUrl)) handleLocally();
+else forwardToNode(targetNode);
+
+// Hash ring automatically handles:
+// - Load balancing across nodes
+// - Minimal data movement when nodes are added/removed
+// - 360-degree visualization for debugging
 ```
 
 ---
@@ -142,6 +161,9 @@ curl -X DELETE http://localhost:7001/api/v1/del/user:123
 
 # Check cluster state (shows all active nodes)
 curl http://localhost:7001/cluster/state
+
+# Check hash ring statistics and ranges
+curl http://localhost:7001/cluster/ring
 ```
 
 **Concurrent Load Testing:**
@@ -164,6 +186,7 @@ python bulk_set.py
 | `GET` | `/api/v1/get/{key}` | Retrieve value by key | `/api/v1/get/user:1` |
 | `DELETE` | `/api/v1/del/{key}` | Delete key | `/api/v1/del/user:1` |
 | `GET` | `/cluster/state` | Node cluster info | Shows node ID, peers, and status |
+| `GET` | `/cluster/ring` | Hash ring statistics | Virtual nodes, ranges, 360-degree visualization |
 
 ### Peer-to-Peer Behavior
 
@@ -193,6 +216,14 @@ spring.jpa.database-platform=org.hibernate.dialect.PostgreSQLDialect
 # Peer-to-Peer Configuration
 node.id=1
 node.peers=http://localhost:7001,http://localhost:7002,http://localhost:7003
+
+# Consistent Hashing Configuration
+node.routing.virtual-nodes=150
+node.routing.hash-algorithm=MD5
+
+# Logging Configuration
+logging.file.name=logs/limedb-node-${server.port}.log
+logging.level.org.limedb.node.service.NodeService=DEBUG
 ```
 
 ### Runtime Parameters
@@ -248,7 +279,7 @@ GRANT ALL PRIVILEGES ON DATABASE limedb_node_3 TO limedb;
 | **ORM** | JPA/Hibernate | Database mapping & operations |
 | **Build** | Gradle | Build automation & dependency management |
 | **Architecture** | Peer-to-Peer | Distributed system pattern |
-| **Routing** | Hash + Modulo | Simple deterministic routing |
+| **Routing** | Consistent Hashing | Virtual nodes with MD5 hash ring |
 | **Communication** | HTTP REST | Inter-node communication |
 
 
