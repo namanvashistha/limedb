@@ -7,10 +7,9 @@
 
 ## LimeDB
 
-**LimeDB** is a **distributed key-value database** built with **Java 21** and **Spring Boot**.  
-It implements core distributed systems concepts including **consistent hashing with virtual nodes**, **peer-to-peer routing**, **automatic failover**, **consensus protocols**, and **dynamic rebalancing** for horizontal scalability.
+**LimeDB** is a **highly-scalable distributed key-value store**. Keys are consistently hashed across multiple nodes using virtual node topology for optimal load distribution and minimal data movement during cluster changes.
 
-Built as a hands-on learning platform for distributed systems fundamentals, LimeDB features a complete **hash ring implementation** with performance optimization, comprehensive monitoring, and a clear evolution path from PostgreSQL persistence through gossip protocols to custom LSM tree storage engines.
+Built as a hands-on learning platform for distributed systems fundamentals, LimeDB currently implements peer-to-peer routing and complete hash ring topology. Planned features include automatic failover, gossip protocol, consensus protocols, dynamic rebalancing, and evolution from PostgreSQL persistence toward custom LSM tree storage engines.
 
 ---
 
