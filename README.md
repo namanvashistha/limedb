@@ -288,7 +288,7 @@ GRANT ALL PRIVILEGES ON DATABASE limedb_node_3 TO limedb;
 
 ---
 
-## � Testing
+## Testing
 
 ### Manual Testing
 ```bash
@@ -323,7 +323,7 @@ curl http://localhost:8080/api/v1/health
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
