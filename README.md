@@ -7,7 +7,11 @@
 
 ## LimeDB
 
-**LimeDB** is a **highly-scalable distributed key-value store**. Keys are consistently hashed across multiple nodes using virtual node topology for optimal load distribution and minimal data movement during cluster changes.
+**LimeDB** is a **highly-scalable distributed key-value store**.
+
+It operates in a peer-to-peer architecture where any node can act as both coordinator and storage, eliminating single points of failure.
+
+Keys are consistently hashed across multiple nodes using virtual node topology for optimal load distribution and minimal data movement during cluster changes.
 
 Built as a hands-on learning platform for distributed systems fundamentals, LimeDB currently implements peer-to-peer routing and complete hash ring topology. Planned features include automatic failover, gossip protocol, consensus protocols, dynamic rebalancing, and evolution from PostgreSQL persistence toward custom LSM tree storage engines.
 
