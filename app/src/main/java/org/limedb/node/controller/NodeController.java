@@ -79,6 +79,8 @@ public class NodeController {
             Map<String, Object> ringStats = routingService.getRingStatistics();
             ringStats.put("currentNode", routingService.getCurrentNodeUrl());
             ringStats.put("allNodes", routingService.getAllNodes());
+            ringStats.put("ranges", routingService.getNodeRanges());
+            ringStats.put("rangesDegrees", routingService.getNodeRangesDegrees());
             return ResponseEntity.ok(ringStats);
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

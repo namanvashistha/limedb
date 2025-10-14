@@ -1,8 +1,10 @@
-import requests
 import random
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
+from pprint import pp
+
+import requests
 
 peers = [
     "http://localhost:7001",
@@ -86,7 +88,7 @@ def set_values_concurrent(total_keys=10_000, max_workers=50):
     global success_count, error_count
     success_count = error_count = 0
 
-    print(f"🚀 Starting concurrent SET operations...")
+    print("🚀 Starting concurrent SET operations...")
     print(f"📊 Keys: {total_keys}, Workers: {max_workers}, Peers: {len(peers)}")
 
     start_time = time.time()
@@ -123,7 +125,7 @@ def get_values_concurrent(start_key=900, end_key=1100, max_workers=20):
     success_count = error_count = 0
 
     total_keys = end_key - start_key
-    print(f"\n🔍 Starting concurrent GET operations...")
+    print("\n🔍 Starting concurrent GET operations...")
     print(
         f"📊 Keys: {start_key}-{end_key} ({total_keys} total), Workers: {max_workers}"
     )
@@ -152,7 +154,7 @@ def get_values_concurrent(start_key=900, end_key=1100, max_workers=20):
     elapsed = time.time() - start_time
     total_rate = total_keys / elapsed
 
-    print(f"\n📈 GET Results:")
+    print("\n📈 GET Results:")
     print(f"   Total: {total_keys} requests")
     print(f"   Success: {success_count}")
     print(f"   Errors: {error_count}")
@@ -162,7 +164,7 @@ def get_values_concurrent(start_key=900, end_key=1100, max_workers=20):
 
 def sequential_set_values():
     """Original sequential implementation for comparison"""
-    print(f"🐌 Starting sequential SET operations...")
+    print("🐌 Starting sequential SET operations...")
     start_time = time.time()
 
     for i in range(0, 1000):  # Smaller number for comparison
@@ -217,7 +219,7 @@ def test_consistent_hashing():
                 )
                 print(f"   Current Node: {ring_stats.get('currentNode')}")
                 print(f"   All Nodes: {ring_stats.get('allNodes')}")
-                # print(ring_stats)
+                pp(ring_stats["ranges"])
                 # Show virtual node distribution
                 distribution = ring_stats.get("virtualNodeDistribution", {})
                 print("   Virtual Node Distribution:")
@@ -247,8 +249,8 @@ if __name__ == "__main__":
 
     if choice == "1":
         # Concurrent test
-        set_values_concurrent(total_keys=50000, max_workers=50)
-        get_values_concurrent(start_key=0, end_key=50000, max_workers=20)
+        set_values_concurrent(total_keys=10000, max_workers=2)
+        # get_values_concurrent(start_key=0, end_key=50000, max_workers=20)
 
     elif choice == "2":
         # Sequential test

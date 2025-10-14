@@ -47,21 +47,6 @@ public class NodeService {
     }
 
     /**
-     * Legacy method for backward compatibility - determines which node should handle the given key (1-based)
-     * @deprecated Use getTargetNodeUrl() and consistent hashing instead
-     */
-    @Deprecated
-    public int getTargetNodeId(String key) {
-        if (peerUrls == null || peerUrls.isEmpty()) {
-            throw new RuntimeException("No peers configured");
-        }
-        
-        // Use simple modulo-based routing with String.hashCode()
-        // Convert from 0-based to 1-based: Node 1, 2, 3...
-        return (Math.abs(key.hashCode()) % peerUrls.size()) + 1;
-    }
-
-    /**
      * Handle GET request - either locally or forward to peer
      */
     public ResponseEntity<String> handleGet(String key) {

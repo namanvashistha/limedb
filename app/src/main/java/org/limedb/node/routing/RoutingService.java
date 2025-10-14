@@ -113,6 +113,20 @@ public class RoutingService {
     }
 
     /**
+     * Get hash ranges for each node in the ring
+     */
+    public Map<String, List<Map<String, Object>>> getNodeRanges() {
+        return hashRing.getNodeRanges();
+    }
+
+    /**
+     * Get hash ranges for each node converted to 360-degree ranges for visualization
+     */
+    public Map<String, List<Map<String, Object>>> getNodeRangesDegrees() {
+        return hashRing.getNodeRangesDegrees();
+    }
+
+    /**
      * Update the ring topology with a new set of nodes
      * (useful for handling cluster membership changes)
      */

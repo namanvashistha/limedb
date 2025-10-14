@@ -134,6 +134,119 @@ public class ConsistentHashRing {
     }
 
     /**
+     * Get hash ranges for each node in the ring
+     * Each range represents the hash values that a node is responsible for
+     */
+    public synchronized Map<String, List<Map<String, Object>>> getNodeRanges() {
+        Map<String, List<Map<String, Object>>> nodeRanges = new HashMap<>();
+        
+        if (ring.isEmpty()) {
+            return nodeRanges;
+        }
+
+        // Initialize lists for each node
+        for (String node : nodes) {
+            nodeRanges.put(node, new ArrayList<>());
+        }
+
+        List<Long> sortedHashes = new ArrayList<>(ring.keySet());
+        Collections.sort(sortedHashes);
+
+        for (int i = 0; i < sortedHashes.size(); i++) {
+            Long currentHash = sortedHashes.get(i);
+            String currentNode = ring.get(currentHash);
+            
+            // Calculate range start (previous hash + 1, or minimum for first)
+            Long rangeStart;
+            if (i == 0) {
+                // First node wraps around from the last node
+                Long lastHash = sortedHashes.get(sortedHashes.size() - 1);
+                rangeStart = lastHash + 1;
+            } else {
+                rangeStart = sortedHashes.get(i - 1) + 1;
+            }
+            
+            Long rangeEnd = currentHash;
+            
+            Map<String, Object> range = new HashMap<>();
+            range.put("start", rangeStart);
+            range.put("end", rangeEnd);
+            range.put("hash", currentHash);
+            range.put("size", rangeEnd - rangeStart + 1);
+            
+            nodeRanges.get(currentNode).add(range);
+        }
+
+        return nodeRanges;
+    }
+
+    /**
+     * Get hash ranges for each node converted to 360-degree ranges for visualization
+     * This makes it easier to visualize the hash ring as a circle
+     */
+    public synchronized Map<String, List<Map<String, Object>>> getNodeRangesDegrees() {
+        Map<String, List<Map<String, Object>>> nodeRanges = new HashMap<>();
+        
+        if (ring.isEmpty()) {
+            return nodeRanges;
+        }
+
+        // Initialize lists for each node
+        for (String node : nodes) {
+            nodeRanges.put(node, new ArrayList<>());
+        }
+
+        List<Long> sortedHashes = new ArrayList<>(ring.keySet());
+        Collections.sort(sortedHashes);
+
+        // Calculate the total hash space range
+        long minHash = Long.MIN_VALUE;
+        long maxHash = Long.MAX_VALUE;
+        long totalHashSpace = maxHash - minHash;
+
+        for (int i = 0; i < sortedHashes.size(); i++) {
+            Long currentHash = sortedHashes.get(i);
+            String currentNode = ring.get(currentHash);
+            
+            // Calculate range start (previous hash + 1, or minimum for first)
+            Long rangeStart;
+            if (i == 0) {
+                // First node wraps around from the last node
+                Long lastHash = sortedHashes.get(sortedHashes.size() - 1);
+                rangeStart = lastHash + 1;
+            } else {
+                rangeStart = sortedHashes.get(i - 1) + 1;
+            }
+            
+            Long rangeEnd = currentHash;
+            
+            // Convert to degrees (0-360)
+            double startDegrees = ((double)(rangeStart - minHash) / totalHashSpace) * 360.0;
+            double endDegrees = ((double)(rangeEnd - minHash) / totalHashSpace) * 360.0;
+            double sizeDegrees = endDegrees - startDegrees;
+            
+            // Handle wraparound case for the first range
+            if (i == 0 && rangeStart > rangeEnd) {
+                // This range wraps around the ring
+                sizeDegrees = (360.0 - startDegrees) + endDegrees;
+            }
+            
+            Map<String, Object> range = new HashMap<>();
+            range.put("startHash", rangeStart);
+            range.put("endHash", rangeEnd);
+            range.put("hash", currentHash);
+            range.put("startDegrees", Math.round(startDegrees * 100.0) / 100.0); // Round to 2 decimal places
+            range.put("endDegrees", Math.round(endDegrees * 100.0) / 100.0);
+            range.put("sizeDegrees", Math.round(sizeDegrees * 100.0) / 100.0);
+            range.put("sizeHash", rangeEnd - rangeStart + 1);
+            
+            nodeRanges.get(currentNode).add(range);
+        }
+
+        return nodeRanges;
+    }
+
+    /**
      * Hash function using MD5
      */
     private long hash(String input) {
