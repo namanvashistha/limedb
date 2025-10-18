@@ -1,8 +1,18 @@
 # Multi-stage build for LimeDB
-# Stage 1: Build the application
-FROM gradle:8.5-jdk21 AS builder
+# Stage 1: Build the application using Amazon Corretto
+FROM amazoncorretto:21 AS builder
 
 WORKDIR /app
+
+# Install curl and unzip for gradle
+RUN yum update -y && yum install -y curl unzip && yum clean all
+
+# Install Gradle manually
+RUN curl -L https://services.gradle.org/distributions/gradle-8.5-bin.zip -o gradle.zip && \
+    unzip gradle.zip && \
+    mv gradle-8.5 /opt/gradle && \
+    rm gradle.zip
+ENV PATH="/opt/gradle/bin:${PATH}"
 
 # Copy gradle files first for better caching
 COPY gradle/ gradle/
@@ -12,15 +22,17 @@ COPY gradlew gradlew.bat gradle.properties settings.gradle.kts ./
 COPY app/ app/
 
 # Build the application
-RUN ./gradlew :app:bootJar --no-daemon
+RUN gradle :app:bootJar --no-daemon
 
 # Stage 2: Runtime image
-FROM eclipse-temurin:21-jre
+FROM ubuntu:22.04
 
 WORKDIR /app
 
-# Install PostgreSQL client (optional, for debugging)
-RUN apt-get update && apt-get install -y postgresql-client && rm -rf /var/lib/apt/lists/*
+# Install OpenJDK 21 and curl for health checks
+RUN apt-get update && \
+    apt-get install -y openjdk-21-jre curl && \
+    rm -rf /var/lib/apt/lists/*
 
 # Create a non-root user
 RUN groupadd -r limedb && useradd -r -g limedb limedb
@@ -28,7 +40,7 @@ RUN groupadd -r limedb && useradd -r -g limedb limedb
 # Copy the built jar from builder stage
 COPY --from=builder /app/app/build/libs/*.jar app.jar
 
-# Create logs directory
+# Create logs directory and set permissions
 RUN mkdir -p logs && chown -R limedb:limedb /app
 
 # Switch to non-root user
