@@ -179,6 +179,65 @@ python bulk_set.py
 
 ---
 
+## 🐳 Docker Deployment
+
+### Container Specifications
+- **Base Image**: Amazon Corretto 21 Alpine
+- **Size**: 384MB (47% smaller than standard images)
+- **Memory**: 256MB-1GB heap (configurable)
+- **Security**: Non-root user, minimal attack surface
+- **Signals**: Proper signal handling with dumb-init
+
+### Development Setup
+```bash
+# Build optimized image
+docker build -t limedb:latest .
+
+# Start with external database
+docker run -d -p 7001:7001 \
+  -e NODE_ID=1 \
+  -e DB_HOST=your-postgres-host \
+  -e DB_USERNAME=limedb \
+  -e DB_PASSWORD=your-password \
+  limedb:latest
+```
+
+### Production Cluster
+```bash
+# Full cluster with PostgreSQL
+docker-compose -f docker-compose.prod.yml up -d
+
+# With custom configuration
+DB_PASSWORD=secure_password \
+JVM_MEMORY_OPTS="-Xms1g -Xmx2g" \
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+### Environment Variables
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NODE_ID` | `1` | Unique node identifier |
+| `DB_HOST` | `localhost` | PostgreSQL host |
+| `DB_PORT` | `5432` | PostgreSQL port |
+| `DB_USERNAME` | `limedb` | Database username |
+| `DB_PASSWORD` | `limedb` | Database password |
+| `JVM_MEMORY_OPTS` | `-Xms256m -Xmx512m` | JVM heap settings |
+| `JAVA_OPTS` | (optimized) | JVM performance flags |
+
+### Health Checks
+```bash
+# Container health
+docker ps --format "table {{.Names}}\t{{.Status}}"
+
+# Application health  
+curl http://localhost:7001/actuator/health
+
+# Cluster metrics
+curl http://localhost:7001/cluster/state | jq
+```
+
+---
+
 ## API Reference
 
 ### Node API (Any Port - 7001, 7002, 7003)
