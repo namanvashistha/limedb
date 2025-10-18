@@ -1,0 +1,185 @@
+# Docker Compose for LimeDB Production Deployment
+version: '3.8'
+
+services:
+  # PostgreSQL Database with production settings
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: limedb_cluster
+      POSTGRES_USER: ${DB_USERNAME:-limedb}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-limedb}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    command: >
+      postgres
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-limedb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - limedb-network
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+  # LimeDB Cluster Nodes
+  limedb-node1: &limedb-node
+    image: ${LIMEDB_IMAGE:-limedb:latest}
+    environment: &limedb-env
+      NODE_ID: 1
+      DB_HOST: postgres
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USERNAME: ${DB_USERNAME:-limedb}
+      DB_PASSWORD: ${DB_PASSWORD:-limedb}
+      DB_NAME: limedb_node1
+      JVM_MEMORY_OPTS: "-Xms512m -Xmx1g -XX:MetaspaceSize=128m -XX:MaxMetaspaceSize=256m"
+      JAVA_OPTS: "${JAVA_OPTS:--server -XX:+UseG1GC -XX:MaxGCPauseMillis=200}"
+    ports:
+      - "${NODE1_PORT:-7001}:7001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7001/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    networks:
+      - limedb-network
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  limedb-node2:
+    <<: *limedb-node
+    environment:
+      <<: *limedb-env
+      NODE_ID: 2
+      DB_NAME: limedb_node2
+    ports:
+      - "${NODE2_PORT:-7002}:7001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      limedb-node1:
+        condition: service_healthy
+
+  limedb-node3:
+    <<: *limedb-node
+    environment:
+      <<: *limedb-env
+      NODE_ID: 3
+      DB_NAME: limedb_node3
+    ports:
+      - "${NODE3_PORT:-7003}:7001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      limedb-node1:
+        condition: service_healthy
+
+  limedb-node4:
+    <<: *limedb-node
+    environment:
+      <<: *limedb-env
+      NODE_ID: 4
+      DB_NAME: limedb_node4
+    ports:
+      - "${NODE4_PORT:-7004}:7001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      limedb-node1:
+        condition: service_healthy
+
+  limedb-node5:
+    <<: *limedb-node
+    environment:
+      <<: *limedb-env
+      NODE_ID: 5
+      DB_NAME: limedb_node5
+    ports:
+      - "${NODE5_PORT:-7005}:7001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      limedb-node1:
+        condition: service_healthy
+
+  # Optional: Monitoring with Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    profiles:
+      - monitoring
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - limedb-network
+    restart: unless-stopped
+
+  # Optional: Grafana for metrics visualization
+  grafana:
+    image: grafana/grafana:latest
+    profiles:
+      - monitoring
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+    networks:
+      - limedb-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  limedb-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

@@ -1,0 +1,63 @@
+# .dockerignore - Optimize Docker build context
+
+# Git files
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+README.md
+DOCKER.md
+LICENSE
+logo/
+
+# IDE files
+.vscode/
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build artifacts (keep app/build for copying jar)
+.gradle/
+build/
+!app/build/
+# Keep gradle wrapper for build process
+# gradle-wrapper.properties
+# gradlew
+# gradlew.bat
+
+# Test results
+**/build/reports/
+**/build/test-results/
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+*.tmp
+*.swp
+*.bak
+tmp/
+
+# Scripts (not needed in container build)
+scripts/
+
+# Local environment files
+.env
+.env.local
+.env.*.local
+
+# Coverage reports
+**/build/jacoco/
+coverage/
+
+# Docker files (avoid recursive copying)
+Dockerfile*
+docker-compose*.yml
+.dockerignore

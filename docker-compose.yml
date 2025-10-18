@@ -1,0 +1,128 @@
+# Docker Compose for LimeDB Development and Testing
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: limedb_cluster
+      POSTGRES_USER: limedb
+      POSTGRES_PASSWORD: limedb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U limedb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - limedb-network
+
+  # LimeDB Node 1 (Primary)
+  limedb-node1:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_PROFILE: docker
+    environment:
+      NODE_ID: 1
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: limedb
+      DB_PASSWORD: limedb
+      DB_NAME: limedb_node1
+      JVM_MEMORY_OPTS: "-Xms256m -Xmx512m"
+    ports:
+      - "7001:7001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7001/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - limedb-network
+    restart: unless-stopped
+
+  # LimeDB Node 2
+  limedb-node2:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_PROFILE: docker
+    environment:
+      NODE_ID: 2
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: limedb
+      DB_PASSWORD: limedb
+      DB_NAME: limedb_node2
+      JVM_MEMORY_OPTS: "-Xms256m -Xmx512m"
+    ports:
+      - "7002:7001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      limedb-node1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7001/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - limedb-network
+    restart: unless-stopped
+
+  # LimeDB Node 3
+  limedb-node3:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_PROFILE: docker
+    environment:
+      NODE_ID: 3
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: limedb
+      DB_PASSWORD: limedb
+      DB_NAME: limedb_node3
+      JVM_MEMORY_OPTS: "-Xms256m -Xmx512m"
+    ports:
+      - "7003:7001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      limedb-node1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7001/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - limedb-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  limedb-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
