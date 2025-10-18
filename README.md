@@ -4,7 +4,7 @@
   </picture>
 </div>
 <br>
-test1
+test2
 ## LimeDB
 
 **LimeDB** is a **highly-scalable distributed key-value store**.
