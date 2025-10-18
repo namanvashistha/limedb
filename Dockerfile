@@ -24,18 +24,16 @@ COPY app/ app/
 # Build the application
 RUN gradle :app:bootJar --no-daemon
 
-# Stage 2: Runtime image
-FROM ubuntu:22.04
+# Stage 2: Runtime image - Using smaller JRE base
+FROM amazoncorretto:21-alpine
 
 WORKDIR /app
 
-# Install OpenJDK 21 and curl for health checks
-RUN apt-get update && \
-    apt-get install -y openjdk-21-jre curl && \
-    rm -rf /var/lib/apt/lists/*
+# Install curl for health checks (Alpine uses apk)
+RUN apk add --no-cache curl
 
-# Create a non-root user
-RUN groupadd -r limedb && useradd -r -g limedb limedb
+# Create a non-root user (Alpine syntax)
+RUN addgroup -S limedb && adduser -S limedb -G limedb
 
 # Copy the built jar from builder stage
 COPY --from=builder /app/app/build/libs/*.jar app.jar
