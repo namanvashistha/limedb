@@ -5,6 +5,8 @@
 </div>
 <br>
 
+> **🚧 Migration Notice**: We are in the process of migrating LimeDB from Java to **Go** for better performance, lower memory footprint, and simpler deployment. The Go implementation will maintain API compatibility while offering significant improvements in resource efficiency and operational simplicity. The current Java implementation remains fully functional and will continue to receive maintenance updates during the transition period.
+
 ## LimeDB
 
 **LimeDB** is a **highly-scalable distributed key-value store**.
