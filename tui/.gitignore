@@ -1,0 +1,28 @@
+*.pyc
+*.db
+*.pid
+*.DS_Store
+kernel/static/
+kernel/local_settings.py
+venv/
+venv2/
+venvpy3/
+venvpy38/
+p27/
+.vscode
+.idea
+*.log
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.py.bak
+kernel/.cph/
+temp_test.py
+*.mongodb
+
+# Test Artifacts
+.coverage
+pytest-coverage.txt
+pytest.xml
