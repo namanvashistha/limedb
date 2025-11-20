@@ -167,7 +167,7 @@ def sequential_set_values():
     print("🐌 Starting sequential SET operations...")
     start_time = time.time()
 
-    for i in range(0, 1000):  # Smaller number for comparison
+    for i in range(0, 10000):  # Smaller number for comparison
         base_url = random.choice(peers)
         url = f"{base_url}/api/v1/set"
         payload = {"key": f"seq_key_{i}", "value": f"seq_value_{i}"}

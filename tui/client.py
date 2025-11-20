@@ -64,3 +64,40 @@ class ClusterClient:
                     return {"status": response.status, "body": text}
         except Exception as e:
             return {"error": repr(e)}
+
+    async def get_metrics(self, port: int = 7001) -> Dict[str, Any]:
+        """Fetches JVM metrics from Actuator."""
+        metrics = {}
+        base_url = f"http://localhost:{port}/actuator/metrics"
+        
+        keys = {
+            "jvm.memory.used": "memory",
+            "system.cpu.usage": "cpu",
+            "process.uptime": "uptime"
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            for metric_name, alias in keys.items():
+                try:
+                    async with session.get(f"{base_url}/{metric_name}", timeout=1) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            measurements = data.get("measurements", [])
+                            if measurements:
+                                metrics[alias] = measurements[0].get("value", 0)
+                except Exception:
+                    metrics[alias] = -1
+        return metrics
+
+    async def measure_latency(self, port: int = 7001) -> float:
+        """Measures latency to the node in milliseconds."""
+        url = f"http://localhost:{port}/api/v1/cluster/state"
+        start = asyncio.get_event_loop().time()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=1) as response:
+                    await response.read()
+                    end = asyncio.get_event_loop().time()
+                    return (end - start) * 1000
+        except Exception:
+            return 9999.0
