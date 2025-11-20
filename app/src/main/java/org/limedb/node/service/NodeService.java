@@ -1,5 +1,6 @@
 package org.limedb.node.service;
 
+import org.limedb.node.dto.GetResponse;
 import org.limedb.node.dto.SetRequest;
 import org.limedb.node.repository.NodeRepository;
 import org.limedb.node.routing.RoutingService;
@@ -17,13 +18,13 @@ public class NodeService {
 
     private final NodeRepository repository;
     private final RoutingService routingService;
-    
+
     @Autowired
     private int nodeId;
-    
+
     @Autowired
     private List<String> peerUrls;
-    
+
     @Autowired
     private RestTemplate restTemplate;
 
@@ -49,10 +50,11 @@ public class NodeService {
     /**
      * Handle GET request - either locally or forward to peer
      */
-    public ResponseEntity<String> handleGet(String key) {
+    public ResponseEntity<GetResponse> handleGet(String key) {
         if (shouldHandleLocally(key)) {
             String value = getLocal(key);
-            return value != null ? ResponseEntity.ok(value) : ResponseEntity.notFound().build();
+            return value != null ? ResponseEntity.ok(new GetResponse(value, nodeId))
+                    : ResponseEntity.notFound().build();
         } else {
             return forwardGet(key);
         }
@@ -110,14 +112,13 @@ public class NodeService {
     }
 
     // Peer forwarding methods using consistent hashing
-    private ResponseEntity<String> forwardGet(String key) {
+    private ResponseEntity<GetResponse> forwardGet(String key) {
         String targetUrl = getTargetNodeUrl(key);
-        
+
         try {
             return restTemplate.getForEntity(
-                targetUrl + "/api/v1/get/" + key, 
-                String.class
-            );
+                    targetUrl + "/api/v1/get/" + key,
+                    GetResponse.class);
         } catch (ResourceAccessException e) {
             throw new RuntimeException("Failed to reach peer node " + targetUrl, e);
         }
@@ -125,14 +126,13 @@ public class NodeService {
 
     private ResponseEntity<String> forwardSet(String key, String value) {
         String targetUrl = getTargetNodeUrl(key);
-        
+
         try {
             SetRequest request = new SetRequest(key, value);
             return restTemplate.postForEntity(
-                targetUrl + "/api/v1/set",
-                request,
-                String.class
-            );
+                    targetUrl + "/api/v1/set",
+                    request,
+                    String.class);
         } catch (ResourceAccessException e) {
             throw new RuntimeException("Failed to reach peer node " + targetUrl, e);
         }
@@ -140,14 +140,13 @@ public class NodeService {
 
     private ResponseEntity<String> forwardDelete(String key) {
         String targetUrl = getTargetNodeUrl(key);
-        
+
         try {
             return restTemplate.exchange(
-                targetUrl + "/api/v1/del/" + key,
-                org.springframework.http.HttpMethod.DELETE,
-                null,
-                String.class
-            );
+                    targetUrl + "/api/v1/del/" + key,
+                    org.springframework.http.HttpMethod.DELETE,
+                    null,
+                    String.class);
         } catch (ResourceAccessException e) {
             throw new RuntimeException("Failed to reach peer node " + targetUrl, e);
         }

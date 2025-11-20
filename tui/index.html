@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm/css/xterm.css" />
+  <script src="https://cdn.jsdelivr.net/npm/xterm/lib/xterm.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
+</head>
+<body style="margin:0; background:black; height: 100vh; overflow: hidden;">
+  <div id="terminal" style="height:100%; width: 100%;"></div>
+  <script>
+    const term = new Terminal({
+      fontSize: 16,
+      cursorBlink: true,
+      theme: { background: "#000000" },
+      fontFamily: 'Menlo, Monaco, "Courier New", monospace'
+    });
+    
+    const fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+    
+    term.open(document.getElementById("terminal"));
+    fitAddon.fit();
+
+    window.addEventListener('resize', () => {
+        fitAddon.fit();
+        const dims = fitAddon.proposeDimensions();
+        if (dims && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({type: 'resize', cols: dims.cols, rows: dims.rows}));
+        }
+    });
+
+    const socket = new WebSocket("ws://localhost:8765");
+
+    // output from server → terminal
+    socket.onmessage = (event) => {
+      term.write(event.data);
+    };
+
+    // input in terminal → server
+    term.onData(data => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({type: 'input', data: data}));
+      }
+    });
+    
+    // Handle socket open to resize immediately if needed
+    socket.onopen = () => {
+        fitAddon.fit();
+        const dims = fitAddon.proposeDimensions();
+        if (dims) {
+            socket.send(JSON.stringify({type: 'resize', cols: dims.cols, rows: dims.rows}));
+        }
+        term.focus();
+    };
+  </script>
+</body>
+</html>

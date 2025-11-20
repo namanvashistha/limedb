@@ -259,7 +259,7 @@ class DataExplorer(Static):
             resp = await client.delete_key(key)
             output.update(resp)
 
-class LimeDBTui(App):
+class LimeDB(App):
     """A Textual app to manage LimeDB Cluster."""
 
     CSS = """
@@ -446,5 +446,5 @@ class LimeDBTui(App):
         self.call_later(self.update_data)
 
 if __name__ == "__main__":
-    app = LimeDBTui()
+    app = LimeDB()
     app.run()

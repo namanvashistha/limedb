@@ -1,5 +1,6 @@
 package org.limedb.node.controller;
 
+import org.limedb.node.dto.GetResponse;
 import org.limedb.node.dto.SetRequest;
 import org.limedb.node.service.NodeService;
 import org.limedb.node.routing.RoutingService;
@@ -16,10 +17,10 @@ import java.util.Map;
 public class NodeController {
     private final NodeService service;
     private final RoutingService routingService;
-    
+
     @Autowired
     private int nodeId;
-    
+
     @Autowired
     private List<String> peerUrls;
 
@@ -30,13 +31,8 @@ public class NodeController {
 
     // GET /get/:key - Get value of a key (with peer-to-peer routing)
     @GetMapping("/get/{key}")
-    public ResponseEntity<String> get(@PathVariable String key) {
-        try {
-            return service.handleGet(key);
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Error: " + e.getMessage());
-        }
+    public ResponseEntity<GetResponse> get(@PathVariable String key) {
+        return service.handleGet(key);
     }
 
     // POST /set - Set value of a key (with peer-to-peer routing)
@@ -65,11 +61,10 @@ public class NodeController {
     @GetMapping("/cluster/state")
     public ResponseEntity<Map<String, Object>> clusterState() {
         return ResponseEntity.ok(Map.of(
-            "nodeId", nodeId,
-            "peers", peerUrls,
-            "totalNodes", peerUrls.size(),
-            "status", "active"
-        ));
+                "nodeId", nodeId,
+                "peers", peerUrls,
+                "totalNodes", peerUrls.size(),
+                "status", "active"));
     }
 
     // GET /cluster/ring - Show consistent hash ring statistics
