@@ -349,6 +349,10 @@ echo -e "${DGN}━━━━━━━━━━━━━━━━━━━━━�
 # Install dependencies, LimeDB, and OTEL Collector (optimized single operation)
 echo -ne " ${YW}Installing LimeDB + OTEL Collector (all steps)...${CL}"
 pct exec $CTID -- bash -c "
+# Set environment variables from host
+export GRAFANA_OTLP_ENDPOINT='$GRAFANA_OTLP_ENDPOINT'
+export GRAFANA_CLOUD_USERNAME='$GRAFANA_CLOUD_USERNAME' 
+export GRAFANA_CLOUD_PASSWORD='$GRAFANA_CLOUD_PASSWORD'
     # Update and install dependencies
     apt-get update &>/dev/null
     apt-get install -y curl ca-certificates wget tar &>/dev/null
@@ -458,17 +462,17 @@ HOSTNAME=limedb-node
 ENVTEMPLATE
 
     # Create default environment with dynamic values from script environment
-    if [[ -n \"$GRAFANA_CLOUD_USERNAME\" && -n \"$GRAFANA_CLOUD_PASSWORD\" && -n \"$GRAFANA_OTLP_ENDPOINT\" ]]; then
+    if [[ -n \"\$GRAFANA_CLOUD_USERNAME\" && -n \"\$GRAFANA_CLOUD_PASSWORD\" && -n \"\$GRAFANA_OTLP_ENDPOINT\" ]]; then
         # Create base64 encoded auth header
-        AUTH_HEADER=\$(echo -n \"$GRAFANA_CLOUD_USERNAME:$GRAFANA_CLOUD_PASSWORD\" | base64 -w 0)
+        AUTH_HEADER=\$(echo -n \"\$GRAFANA_CLOUD_USERNAME:\$GRAFANA_CLOUD_PASSWORD\" | base64 -w 0)
         
         # Use configured values
         cat > /etc/otelcol/environment << CONFIGUREDENV
 # OTEL Collector Environment Variables
 # Configured automatically from ~/.grafana/config
-GRAFANA_OTLP_ENDPOINT=$GRAFANA_OTLP_ENDPOINT
-GRAFANA_CLOUD_USERNAME=$GRAFANA_CLOUD_USERNAME
-GRAFANA_CLOUD_PASSWORD=$GRAFANA_CLOUD_PASSWORD
+GRAFANA_OTLP_ENDPOINT=\$GRAFANA_OTLP_ENDPOINT
+GRAFANA_CLOUD_USERNAME=\$GRAFANA_CLOUD_USERNAME
+GRAFANA_CLOUD_PASSWORD=\$GRAFANA_CLOUD_PASSWORD
 GRAFANA_CLOUD_AUTH_HEADER=\$AUTH_HEADER
 HOSTNAME=limedb-node
 CONFIGUREDENV
@@ -512,7 +516,7 @@ Environment=OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 Environment=OTEL_SERVICE_NAME=limedb
 Environment=OTEL_SERVICE_VERSION=v0.0.6
 Environment=OTEL_ENVIRONMENT=production
-ExecStart=/usr/local/bin/limedb -server.port 8484 -node.url \"http://\${CONTAINER_IP}:8484\" -node.peers \"http://\${CONTAINER_IP}:8484\"
+ExecStart=/usr/local/bin/limedb -server.port 8484 -node.url \"http://\$CONTAINER_IP:8484\" -node.peers \"http://\$CONTAINER_IP:8484\"
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
@@ -585,7 +589,7 @@ AUTOEOF2
     systemctl start limedb.service &>/dev/null
     
     # Start OTEL Collector if credentials are configured
-    if [[ -n \"$GRAFANA_CLOUD_USERNAME\" && -n \"$GRAFANA_CLOUD_PASSWORD\" && -n \"$GRAFANA_OTLP_ENDPOINT\" ]]; then
+    if [[ -n \"\$GRAFANA_CLOUD_USERNAME\" && -n \"\$GRAFANA_CLOUD_PASSWORD\" && -n \"\$GRAFANA_OTLP_ENDPOINT\" ]]; then
         systemctl start otel-collector.service &>/dev/null
     fi
     
