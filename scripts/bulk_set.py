@@ -6,13 +6,7 @@ from pprint import pp
 
 import requests
 
-peers = [
-    "http://localhost:7001",
-    "http://localhost:7002",
-    "http://localhost:7003",
-    "http://localhost:7004",
-    "http://localhost:7005",
-]
+peers = [f"http://localhost:{i}" for i in range(7001, 7051)]
 
 # Thread-safe counters
 success_count = 0
@@ -249,7 +243,7 @@ if __name__ == "__main__":
 
     if choice == "1":
         # Concurrent test
-        set_values_concurrent(total_keys=10000, max_workers=2)
+        set_values_concurrent(total_keys=1000000, max_workers=5)
         # get_values_concurrent(start_key=0, end_key=50000, max_workers=20)
 
     elif choice == "2":
@@ -275,5 +269,5 @@ if __name__ == "__main__":
 
     else:
         print("Invalid choice, running concurrent test...")
-        set_values_concurrent(total_keys=5000, max_workers=50)
+        set_values_concurrent(total_keys=50000, max_workers=500)
         get_values_concurrent(start_key=1000, end_key=1200, max_workers=20)

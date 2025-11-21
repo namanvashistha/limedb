@@ -4,6 +4,7 @@
 # Log file
 *.log
 *.gz
+.vscode/
 
 # BlueJ files
 *.ctxt
