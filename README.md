@@ -373,11 +373,34 @@ curl http://localhost:8080/api/v1/health
 
 ---
 
+## Automated Releases
+
+LimeDB uses automated semantic versioning based on commit messages:
+
+### Version Bumping
+- **Patch** (`v1.0.0 → v1.0.1`): Default for bug fixes and small changes
+- **Minor** (`v1.0.0 → v1.1.0`): Add `[minor]`, `feat:`, or `feature:` to commit message
+- **Major** (`v1.0.0 → v2.0.0`): Add `[major]` or `breaking:` to commit message
+
+### Examples
+```bash
+git commit -m "Fix memory leak in hash ring"              # → v1.0.1 (patch)
+git commit -m "Add metrics endpoint [minor]"              # → v1.1.0 (minor)
+git commit -m "breaking: change API response format"      # → v2.0.0 (major)
+git commit -m "Update documentation [skip tag]"           # → no release
+```
+
+### Available Downloads
+Each release automatically provides:
+- **Binaries**: Linux, macOS, Windows (AMD64 & ARM64)
+- **Docker Images**: `namanvashistha/limedb:latest` and `namanvashistha/limedb:v1.x.x`
+- **Proxmox LXC**: One-line installation script
+
 ## Contributing
 
 1. **Fork the repository**
 2. **Create a feature branch** (`git checkout -b feature/amazing-feature`)
-3. **Commit your changes** (`git commit -m 'Add amazing feature'`)
+3. **Commit your changes** with [semantic commit messages](#automated-releases)
 4. **Push to the branch** (`git push origin feature/amazing-feature`)
 5. **Open a Pull Request**
 
