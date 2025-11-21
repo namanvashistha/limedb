@@ -14,6 +14,9 @@ var_os="${var_os:-debian}"
 var_version="${var_version:-12}"
 var_unprivileged="${var_unprivileged:-1}"
 
+# Disable the automatic install script behavior
+unset var_install
+
 header_info "$APP"
 variables
 color
@@ -51,6 +54,13 @@ function update_script() {
   
   msg_ok "Updated LimeDB to ${LATEST_VERSION}"
   exit
+}
+
+# Override the install function to prevent external script download
+function install_script() {
+  # This function replaces the framework's install mechanism
+  # All installation is done inline below
+  return 0
 }
 
 start
