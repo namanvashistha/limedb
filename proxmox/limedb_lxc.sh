@@ -307,18 +307,18 @@ EOF
     systemctl enable --now limedb.service &>/dev/null
     
     # Create MOTD
-    cat > /etc/motd << 'EOF'
+    cat > /etc/motd << 'MOTDEOF'
    __    _                ____  ____
   / /   (_)___ ___  ___  / __ \/ __ )
- / /   / / __ `__ \/ _ \/ / / / __  |
+ / /   / / __ \`__ \/ _ \/ / / / __  |
 / /___/ / / / / / /  __/ /_/ / /_/ /
 /_____/_/_/ /_/ /_/\___/_____/_____/
 
 LimeDB - Fast Key-Value Store
-Access: http://$(ip route get 1 | awk '{print \$7}' | head -1):7001
+Access: http://\$(ip route get 1 | awk '{print \$7}' | head -1):7001
 Docs: https://github.com/namanvashistha/limedb
 
-EOF
+MOTDEOF
 "
 
 # Final output
