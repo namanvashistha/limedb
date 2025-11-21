@@ -381,7 +381,7 @@ export GRAFANA_CLOUD_PASSWORD='$GRAFANA_CLOUD_PASSWORD'
     # Create OTEL Collector directories and config
     mkdir -p /etc/otelcol /var/log/otelcol
     
-    # Create OTEL Collector configuration (simplified for standard components)
+    # Create OTEL Collector configuration (minimal working configuration)
     cat > /etc/otelcol/config.yaml << 'OTELCONF'
 receivers:
   otlp:
@@ -395,9 +395,6 @@ processors:
   batch:
     timeout: 1s
     send_batch_size: 512
-  resourcedetection:
-    detectors: [\"env\", \"system\", \"host\"]
-    override: false
   resource:
     attributes:
       - key: service.name
@@ -408,6 +405,9 @@ processors:
         action: upsert
       - key: deployment.environment
         value: production
+        action: upsert
+      - key: host.name
+        from_attribute: host.name
         action: upsert
 
 exporters:
@@ -427,15 +427,15 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [resourcedetection, resource, batch]
+      processors: [resource, batch]
       exporters: [otlphttp/grafana_cloud]
     metrics:
       receivers: [otlp]
-      processors: [resourcedetection, resource, batch]
+      processors: [resource, batch]
       exporters: [otlphttp/grafana_cloud]
     logs:
       receivers: [otlp]
-      processors: [resourcedetection, resource, batch]
+      processors: [resource, batch]
       exporters: [otlphttp/grafana_cloud]
 OTELCONF
 
@@ -468,8 +468,6 @@ ENVTEMPLATE
         
         # Use configured values
         cat > /etc/otelcol/environment << CONFIGUREDENV
-# OTEL Collector Environment Variables
-# Configured automatically from ~/.grafana/config
 GRAFANA_OTLP_ENDPOINT=\$GRAFANA_OTLP_ENDPOINT
 GRAFANA_CLOUD_USERNAME=\$GRAFANA_CLOUD_USERNAME
 GRAFANA_CLOUD_PASSWORD=\$GRAFANA_CLOUD_PASSWORD
