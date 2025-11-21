@@ -35,7 +35,6 @@ function msg_error() {
 }
 
 APP="LimeDB"
-CT_ID="105" # Default ID, can be changed
 CT_PASSWORD="password"
 DISK_SIZE="2G"
 RAM_SIZE="512"
@@ -50,6 +49,18 @@ if [ "$EUID" -ne 0 ]; then
   msg_error "Please run as root"
   exit 1
 fi
+
+# Find available CT ID
+msg_info "Finding available Container ID"
+CT_ID=100
+while pct status $CT_ID >/dev/null 2>&1; do
+    CT_ID=$((CT_ID + 1))
+    if [ $CT_ID -gt 999 ]; then
+        msg_error "No available CT ID found (checked 100-999)"
+        exit 1
+    fi
+done
+msg_ok "Using Container ID: ${CT_ID}"
 
 # 1. Create Container
 msg_info "Creating LXC Container (ID: ${CT_ID})"
