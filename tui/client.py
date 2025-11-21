@@ -1,14 +1,14 @@
 import aiohttp
 import asyncio
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 class ClusterClient:
-    def __init__(self, base_ports: List[int] = [7001, 7002, 7003, 7004, 7005]):
-        self.base_ports = base_ports
-        self.base_urls = [f"http://localhost:{port}/api/v1" for port in base_ports]
+    def __init__(self, base_urls: List[str] = ["http://192.168.1.125:8484", "http://192.168.1.126:8484", "http://192.168.1.127:8484"]):
+        self.base_urls = base_urls
+        self.base_api_urls = [f"{url}/api/v1" for url in base_urls]
 
-    async def get_node_status(self, port: int) -> Dict[str, Any]:
-        url = f"http://localhost:{port}/api/v1/cluster/state"
+    async def get_node_status(self, base_url: str) -> Dict[str, Any]:
+        url = f"{base_url}/api/v1/cluster/state"
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=2) as response:
@@ -18,13 +18,15 @@ class ClusterClient:
         except Exception as e:
             return {"error": str(e)}
 
-    async def get_all_nodes_status(self) -> Dict[int, Dict[str, Any]]:
-        tasks = [self.get_node_status(port) for port in self.base_ports]
+    async def get_all_nodes_status(self) -> Dict[str, Dict[str, Any]]:
+        tasks = [self.get_node_status(base_url) for base_url in self.base_urls]
         results = await asyncio.gather(*tasks)
-        return {port: result for port, result in zip(self.base_ports, results)}
+        return {base_url: result for base_url, result in zip(self.base_urls, results)}
 
-    async def get_ring_state(self, port: int = 7001) -> Dict[str, Any]:
-        url = f"http://localhost:{port}/api/v1/cluster/ring"
+    async def get_ring_state(self, base_url: Optional[str] = None) -> Dict[str, Any]:
+        if base_url is None:
+            base_url = self.base_urls[0] if self.base_urls else "http://192.168.1.125:8484"
+        url = f"{base_url}/api/v1/cluster/ring"
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=2) as response:
@@ -34,8 +36,10 @@ class ClusterClient:
         except Exception as e:
             return {"error": repr(e)}
 
-    async def set_key(self, key: str, value: str, port: int = 7001) -> Dict[str, Any]:
-        url = f"http://localhost:{port}/api/v1/set"
+    async def set_key(self, key: str, value: str, base_url: Optional[str] = None) -> Dict[str, Any]:
+        if base_url is None:
+            base_url = self.base_urls[0] if self.base_urls else "http://192.168.1.125:8484"
+        url = f"{base_url}/api/v1/set"
         payload = {"key": key, "value": value}
         try:
             async with aiohttp.ClientSession() as session:
@@ -45,8 +49,10 @@ class ClusterClient:
         except Exception as e:
             return {"error": repr(e)}
 
-    async def get_key(self, key: str, port: int = 7001) -> Dict[str, Any]:
-        url = f"http://localhost:{port}/api/v1/get/{key}"
+    async def get_key(self, key: str, base_url: Optional[str] = None) -> Dict[str, Any]:
+        if base_url is None:
+            base_url = self.base_urls[0] if self.base_urls else "http://192.168.1.125:8484"
+        url = f"{base_url}/api/v1/get/{key}"
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=2) as response:
@@ -55,8 +61,10 @@ class ClusterClient:
         except Exception as e:
             return {"error": repr(e)}
 
-    async def delete_key(self, key: str, port: int = 7001) -> Dict[str, Any]:
-        url = f"http://localhost:{port}/api/v1/del/{key}"
+    async def delete_key(self, key: str, base_url: Optional[str] = None) -> Dict[str, Any]:
+        if base_url is None:
+            base_url = self.base_urls[0] if self.base_urls else "http://192.168.1.125:8484"
+        url = f"{base_url}/api/v1/del/{key}"
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.delete(url, timeout=2) as response:
@@ -65,33 +73,26 @@ class ClusterClient:
         except Exception as e:
             return {"error": repr(e)}
 
-    async def get_metrics(self, port: int = 7001) -> Dict[str, Any]:
-        """Fetches JVM metrics from Actuator."""
+    async def get_metrics(self, base_url: Optional[str] = None) -> Dict[str, Any]:
+        """Fetches basic metrics from the node."""
+        if base_url is None:
+            base_url = self.base_urls[0] if self.base_urls else "http://192.168.1.125:8484"
         metrics = {}
-        base_url = f"http://localhost:{port}/actuator/metrics"
         
-        keys = {
-            "jvm.memory.used": "memory",
-            "system.cpu.usage": "cpu",
-            "process.uptime": "uptime"
+        # For now, return dummy metrics since Go version doesn't have actuator
+        # TODO: Implement proper metrics endpoint in Go version
+        metrics = {
+            "memory": 0,
+            "cpu": 0,
+            "uptime": 0
         }
-        
-        async with aiohttp.ClientSession() as session:
-            for metric_name, alias in keys.items():
-                try:
-                    async with session.get(f"{base_url}/{metric_name}", timeout=1) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            measurements = data.get("measurements", [])
-                            if measurements:
-                                metrics[alias] = measurements[0].get("value", 0)
-                except Exception:
-                    metrics[alias] = -1
         return metrics
 
-    async def measure_latency(self, port: int = 7001) -> float:
+    async def measure_latency(self, base_url: Optional[str] = None) -> float:
         """Measures latency to the node in milliseconds."""
-        url = f"http://localhost:{port}/api/v1/cluster/state"
+        if base_url is None:
+            base_url = self.base_urls[0] if self.base_urls else "http://192.168.1.125:8484"
+        url = f"{base_url}/api/v1/cluster/state"
         start = asyncio.get_event_loop().time()
         try:
             async with aiohttp.ClientSession() as session:

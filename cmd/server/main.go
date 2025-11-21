@@ -14,12 +14,11 @@ func main() {
 	// Load configuration
 	cfg := config.Load()
 
-	log.Printf("Starting LimeDB Node %d on port %d", cfg.NodeID, cfg.ServerPort)
+	log.Printf("Starting LimeDB Node on port %d", cfg.ServerPort)
 	log.Printf("Peers: %v", cfg.Peers)
 
 	// Initialize Node Service
 	svc := node.New(
-		cfg.NodeID,
 		cfg.ServerPort,
 		cfg.VirtualNodes,
 		cfg.Peers,

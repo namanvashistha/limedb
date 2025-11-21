@@ -104,7 +104,7 @@ func (s *Server) handleDelete(ctx *fasthttp.RequestCtx, key string) {
 
 func (s *Server) handleClusterState(ctx *fasthttp.RequestCtx) {
 	state := map[string]interface{}{
-		"nodeId":     s.service.GetNodeID(),
+		"nodeUrl":    s.service.GetNodeUrl(),
 		"peers":      s.service.GetPeers(),
 		"totalNodes": len(s.service.GetPeers()),
 		"status":     "active",

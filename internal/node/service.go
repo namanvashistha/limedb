@@ -11,8 +11,8 @@ import (
 
 // GetResponse represents the JSON response for a GET request.
 type GetResponse struct {
-	Value  string `json:"value"`
-	NodeID int    `json:"nodeId"`
+	Value   string `json:"value"`
+	NodeUrl string `json:"nodeUrl"`
 }
 
 // SetRequest represents the JSON body for a SET request.
@@ -23,7 +23,6 @@ type SetRequest struct {
 
 // NodeService manages the node's operations and routing.
 type NodeService struct {
-	nodeID         int
 	currentNodeUrl string
 	ring           *ring.ConsistentHashRing
 	store          *Store
@@ -31,7 +30,7 @@ type NodeService struct {
 }
 
 // New creates a new NodeService.
-func New(nodeID int, port int, virtualNodes int, peers []string) *NodeService {
+func New(port int, virtualNodes int, peers []string) *NodeService {
 	currentNodeUrl := fmt.Sprintf("http://localhost:%d", port)
 	
 	r := ring.New(virtualNodes)
@@ -40,7 +39,6 @@ func New(nodeID int, port int, virtualNodes int, peers []string) *NodeService {
 	}
 
 	return &NodeService{
-		nodeID:         nodeID,
 		currentNodeUrl: currentNodeUrl,
 		ring:           r,
 		store:          NewStore(),
@@ -53,9 +51,9 @@ func (s *NodeService) GetRing() *ring.ConsistentHashRing {
 	return s.ring
 }
 
-// GetNodeID returns the current node ID.
-func (s *NodeService) GetNodeID() int {
-	return s.nodeID
+// GetNodeUrl returns the current node URL.
+func (s *NodeService) GetNodeUrl() string {
+	return s.currentNodeUrl
 }
 
 // GetPeers returns the list of peers in the ring.
@@ -76,7 +74,7 @@ func (s *NodeService) HandleGet(key string) (*GetResponse, error) {
 		if !ok {
 			return nil, fmt.Errorf("key not found")
 		}
-		return &GetResponse{Value: val, NodeID: s.nodeID}, nil
+		return &GetResponse{Value: val, NodeUrl: s.currentNodeUrl}, nil
 	}
 	return s.forwardGet(targetUrl, key)
 }

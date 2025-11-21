@@ -50,11 +50,10 @@ trap cleanup SIGINT SIGTERM
 
 # Start Nodes
 for ((i=0; i<NUM_NODES; i++)); do
-    NODE_ID=$((i + 1))
     PORT=$((START_PORT + i))
     
-    echo "Starting Node ${NODE_ID} on port ${PORT}..."
-    $BINARY_PATH -node.id $NODE_ID -server.port $PORT -node.peers "$PEERS" &
+    echo "Starting Node on port ${PORT}..."
+    $BINARY_PATH -server.port $PORT -node.peers "$PEERS" &
     PIDS+=($!)
 done
 

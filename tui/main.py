@@ -50,7 +50,7 @@ class ClusterStatus(Static):
 
     def on_mount(self) -> None:
         table = self.query_one(CyclicDataTable)
-        table.add_columns("STATUS", "NODE ID", "PORT", "PEERS", "CPU", "MEM", "UPTIME", "LATENCY")
+        table.add_columns("STATUS", "NODE URL", "PORT", "PEERS", "CPU", "MEM", "UPTIME", "LATENCY")
         table.cursor_type = "row"
         table.zebra_stripes = False
         table.show_header = True
@@ -61,19 +61,19 @@ class ClusterStatus(Static):
         cursor_row = table.cursor_row
         table.clear()
         
-        sorted_ports = sorted(status_data.keys())
+        sorted_urls = sorted(status_data.keys())
         
-        for port in sorted_ports:
-            data = status_data[port]
-            metrics = metrics_data.get(port, {})
+        for url in sorted_urls:
+            data = status_data[url]
+            metrics = metrics_data.get(url, {})
             
             # Status Icon
             if "error" in data:
                 status_icon = f"[{ERROR_RED}]● DOWN[/]"
-                node_id = "?"
+                node_url = url
                 peers_count = "-"
             else:
-                node_id = str(data.get("nodeId", "?"))
+                node_url = str(data.get("nodeUrl", url))
                 status = data.get("status", "UNKNOWN")
                 peers_count = str(len(data.get("peers", [])))
                 
@@ -81,6 +81,12 @@ class ClusterStatus(Static):
                     status_icon = f"[{LIME_GREEN}]● ACTIVE[/]"
                 else:
                     status_icon = f"[{ERROR_RED}]● {status.upper()}[/]"
+            
+            # Extract port from URL for display
+            try:
+                port = url.split(':')[-1]
+            except:
+                port = "?"
             
             # Metrics
             if "error" in metrics or not metrics:
@@ -106,7 +112,7 @@ class ClusterStatus(Static):
 
             table.add_row(
                 status_icon, 
-                f"[bold white]{node_id}[/]", 
+                f"[bold white]{node_url}[/]", 
                 str(port), 
                 peers_count,
                 cpu,
@@ -411,34 +417,34 @@ class LimeDB(App):
         status_data = await self.client.get_all_nodes_status()
         
         ring_data = {"error": "No active nodes"}
-        for port, data in status_data.items():
+        for url, data in status_data.items():
             if "error" not in data:
-                ring_data = await self.client.get_ring_state(port)
+                ring_data = await self.client.get_ring_state(url)
                 break
         
         # Metrics Data (Parallel Fetch)
         metrics_data = {}
         tasks = []
-        ports = sorted(status_data.keys())
+        urls = sorted(status_data.keys())
         
-        for port in ports:
-            if "error" not in status_data[port]:
-                tasks.append(self.fetch_node_metrics(port))
+        for url in urls:
+            if "error" not in status_data[url]:
+                tasks.append(self.fetch_node_metrics(url))
             else:
-                metrics_data[port] = {"error": "Node Down"}
+                metrics_data[url] = {"error": "Node Down"}
                 
         results = await asyncio.gather(*tasks)
-        active_ports = [p for p in ports if "error" not in status_data[p]]
+        active_urls = [u for u in urls if "error" not in status_data[u]]
         
-        for port, metrics in zip(active_ports, results):
-            metrics_data[port] = metrics
+        for url, metrics in zip(active_urls, results):
+            metrics_data[url] = metrics
 
         self.query_one(ClusterStatus).update_status(status_data, metrics_data)
         self.query_one(RingVisualizer).update_ring(ring_data)
 
-    async def fetch_node_metrics(self, port: int) -> dict:
-        metrics = await self.client.get_metrics(port)
-        latency = await self.client.measure_latency(port)
+    async def fetch_node_metrics(self, base_url: str) -> dict:
+        metrics = await self.client.get_metrics(base_url)
+        latency = await self.client.measure_latency(base_url)
         metrics["latency"] = latency
         return metrics
 
