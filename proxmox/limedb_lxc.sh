@@ -210,6 +210,21 @@ TEMPLATE_PATH="${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE_NAME}.tar.zst"
 # Show container specifications being created
 echo -ne "\r ${DGN}Creating container ${CTID} with ${var_cpu} core(s), ${var_ram}MB RAM, ${var_disk}GB storage...${CL}"
 
+# Generate static IP based on CTID
+HOST_IP=$(ip route get 1 2>/dev/null | awk '{print $7}' | head -1)
+if [[ -n "$HOST_IP" ]]; then
+    # Extract network portion (first 3 octets) and use CTID as last octet
+    NETWORK_PREFIX=$(echo "$HOST_IP" | cut -d. -f1-3)
+    STATIC_IP="${NETWORK_PREFIX}.${CTID}/24"
+    GATEWAY_IP="${NETWORK_PREFIX}.1"
+    NET_CONFIG="ip=${STATIC_IP},gw=${GATEWAY_IP}"
+else
+    # Fallback to DHCP if we can't determine host IP
+    NET_CONFIG="dhcp"
+fi
+
+echo -ne "\r ${DGN}Assigning static IP: ${NETWORK_PREFIX}.${CTID}${CL}"
+
 # Create container in background with progress indication
 (
     pct create $CTID "$TEMPLATE_PATH" \
@@ -219,7 +234,7 @@ echo -ne "\r ${DGN}Creating container ${CTID} with ${var_cpu} core(s), ${var_ram
         --swap 512 \
         --storage $CONTAINER_STORAGE \
         --password $PASSWORD \
-        --net0 name=eth0,bridge=vmbr0,ip=dhcp \
+        --net0 name=eth0,bridge=vmbr0,${NET_CONFIG} \
         --features nesting=1 \
         --unprivileged $var_unprivileged \
         --rootfs $CONTAINER_STORAGE:${var_disk} > /tmp/pct_output.log 2>/tmp/pct_error.log
@@ -302,8 +317,12 @@ for i in {1..15}; do
     fi
 done
 
-# Get container IP
-IP=$(pct exec $CTID -- ip route get 1 2>/dev/null | awk '{print $7}' | head -1)
+# Get container IP (use static IP if configured)
+if [[ -n "$NETWORK_PREFIX" ]]; then
+    IP="${NETWORK_PREFIX}.${CTID}"
+else
+    IP=$(pct exec $CTID -- ip route get 1 2>/dev/null | awk '{print $7}' | head -1)
+fi
 
 # Install LimeDB in container
 echo ""
@@ -407,10 +426,13 @@ echo ""
 echo -e "📋 ${YW}Container Information${CL}"
 echo -e "┌─────────────────────────────────────────────────────┐"
 echo -e "│ ${YW}Container ID:${CL}   ${CTID}"
-echo -e "│ ${YW}IP Address:${CL}     ${IP:-Pending DHCP}"
+echo -e "│ ${YW}IP Address:${CL}     ${IP}$([ -n "$NETWORK_PREFIX" ] && echo " (static)" || echo " (dhcp)")"
 echo -e "│ ${YW}Username:${CL}       root"
 echo -e "│ ${YW}Password:${CL}       ${PASSWORD}"
 echo -e "│ ${YW}Service Port:${CL}   8484"
+if [[ -n "$NETWORK_PREFIX" ]]; then
+echo -e "│ ${YW}Gateway:${CL}        ${GATEWAY_IP}"
+fi
 echo -e "└─────────────────────────────────────────────────────┘"
 echo ""
 
