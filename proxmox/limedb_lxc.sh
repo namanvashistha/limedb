@@ -152,7 +152,7 @@ case "$var_os" in
         ;;
 esac
 
-# Get the latest matching template
+# Get the latest matching template (just the filename)
 OS_TEMPLATE=$(pveam list $TEMPLATE_STORAGE 2>/dev/null | grep "$TEMPLATE_PATTERN" | tail -1 | awk '{print $1}')
 
 if [[ -z "$OS_TEMPLATE" ]]; then
@@ -169,34 +169,72 @@ echo -e "${CM} ${GN}Template ${TEMPLATE_NAME} [${TEMPLATE_STORAGE}]${CL}"
 msg_info "Creating LXC Container"
 
 # Build the pct create command with proper template path
-TEMPLATE_PATH="${TEMPLATE_STORAGE}:vztmpl/${OS_TEMPLATE}"
+# The OS_TEMPLATE already contains the full filename, just need storage:vztmpl/filename
+TEMPLATE_PATH="${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE_NAME}.tar.zst"
 
-# Create container with timeout and better error handling
-timeout 120 pct create $CTID "$TEMPLATE_PATH" \
-    --hostname limedb \
-    --cores $var_cpu \
-    --memory $var_ram \
-    --swap 512 \
-    --storage $CONTAINER_STORAGE \
-    --password $PASSWORD \
-    --net0 name=eth0,bridge=vmbr0,ip=dhcp \
-    --features nesting=1 \
-    --unprivileged $var_unprivileged \
-    --rootfs $CONTAINER_STORAGE:${var_disk} 2>/tmp/pct_error.log
+# Debug: Show the command being executed
+echo -ne "\r ${YW}Executing: pct create $CTID \"$TEMPLATE_PATH\" --hostname limedb --cores $var_cpu --memory $var_ram...${CL}"
 
-CREATE_RESULT=$?
+# Create container in background with progress indication
+(
+    pct create $CTID "$TEMPLATE_PATH" \
+        --hostname limedb \
+        --cores $var_cpu \
+        --memory $var_ram \
+        --swap 512 \
+        --storage $CONTAINER_STORAGE \
+        --password $PASSWORD \
+        --net0 name=eth0,bridge=vmbr0,ip=dhcp \
+        --features nesting=1 \
+        --unprivileged $var_unprivileged \
+        --rootfs $CONTAINER_STORAGE:${var_disk} > /tmp/pct_output.log 2>/tmp/pct_error.log
+    echo $? > /tmp/pct_result
+) &
 
+PCT_PID=$!
+
+# Show progress while waiting
+DOTS=""
+COUNTER=0
+while kill -0 $PCT_PID 2>/dev/null; do
+    DOTS="${DOTS}."
+    if [[ ${#DOTS} -gt 3 ]]; then
+        DOTS=""
+    fi
+    echo -ne "\r ${YW}Creating LXC Container${DOTS}${CL}"
+    sleep 1
+    COUNTER=$((COUNTER + 1))
+    
+    # Timeout after 120 seconds
+    if [[ $COUNTER -gt 120 ]]; then
+        kill $PCT_PID 2>/dev/null
+        echo -ne "\r"
+        msg_error "Container creation timed out after 2 minutes"
+        echo "Partial output:"
+        cat /tmp/pct_output.log 2>/dev/null || echo "No output available"
+        cat /tmp/pct_error.log 2>/dev/null
+        exit 1
+    fi
+done
+
+# Get the result
+wait $PCT_PID
+CREATE_RESULT=$(cat /tmp/pct_result 2>/dev/null || echo 1)
+
+echo -ne "\r"
 if [[ $CREATE_RESULT -eq 0 ]]; then
     echo -e "${CM} ${GN}LXC Container ${CTID} was successfully created.${CL}"
-elif [[ $CREATE_RESULT -eq 124 ]]; then
-    msg_error "Container creation timed out after 2 minutes"
-    exit 1
 else
     msg_error "Failed to create container"
+    echo "Command output:"
+    cat /tmp/pct_output.log 2>/dev/null || echo "No output available"
     echo "Error details:"
     cat /tmp/pct_error.log 2>/dev/null || echo "No error details available"
     exit 1
 fi
+
+# Cleanup temp files
+rm -f /tmp/pct_output.log /tmp/pct_error.log /tmp/pct_result
 
 # Start container
 msg_info "Starting LXC Container"
