@@ -55,7 +55,7 @@ jobs:
           # Check commit message for version bump indicators
           if echo "$commit_message" | grep -qi '\[major\]'; then
             bump_type="major"
-          elif echo "$commit_message" | grep -qi '\[minor\]\|feat:\|feature:'; then
+          elif echo "$commit_message" | grep -qi '\[minor\]'; then
             bump_type="minor"
           elif echo "$commit_message" | grep -qi 'break\|breaking'; then
             bump_type="major"
@@ -197,7 +197,7 @@ jobs:
           BUMP_TYPE="patch"
           if echo "$COMMIT_MSG" | grep -qi '\[major\]\|breaking'; then
             BUMP_TYPE="major"
-          elif echo "$COMMIT_MSG" | grep -qi '\[minor\]\|feat:\|feature:'; then
+          elif echo "$COMMIT_MSG" | grep -qi '\[minor\]'; then
             BUMP_TYPE="minor"
           fi
           
