@@ -30,8 +30,8 @@ type NodeService struct {
 }
 
 // New creates a new NodeService.
-func New(port int, virtualNodes int, peers []string) *NodeService {
-	currentNodeUrl := fmt.Sprintf("http://localhost:%d", port)
+func New(nodeUrl string, virtualNodes int, peers []string) *NodeService {
+	currentNodeUrl := nodeUrl
 	
 	r := ring.New(virtualNodes)
 	for _, peer := range peers {

@@ -2,8 +2,8 @@
 
 # Configuration
 START_PORT=7001
-NUM_NODES=50
-BINARY_PATH="./go-node/limedb"
+NUM_NODES=${NUM_NODES:-50}  # Default to 50 if not set via environment
+BINARY_PATH="./build/limedb"
 
 # Colors
 GREEN='\033[0;32m'
@@ -11,13 +11,11 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}Building LimeDB Go Node...${NC}"
-cd go-node
-go build -o limedb cmd/server/main.go
+go build -o build/limedb ./cmd/server/main.go
 if [ $? -ne 0 ]; then
     echo -e "${RED}Build failed!${NC}"
     exit 1
 fi
-cd ..
 
 # Generate Peers List
 PEERS=""
@@ -51,9 +49,10 @@ trap cleanup SIGINT SIGTERM
 # Start Nodes
 for ((i=0; i<NUM_NODES; i++)); do
     PORT=$((START_PORT + i))
+    NODE_URL="http://localhost:${PORT}"
     
-    echo "Starting Node on port ${PORT}..."
-    $BINARY_PATH -server.port $PORT -node.peers "$PEERS" &
+    echo "Starting Node at ${NODE_URL}..."
+    $BINARY_PATH -server.port $PORT -node.url "$NODE_URL" -node.peers "$PEERS" &
     PIDS+=($!)
 done
 

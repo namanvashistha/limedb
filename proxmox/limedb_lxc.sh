@@ -329,6 +329,10 @@ echo ""
 echo -e "📦 ${YW}Installing LimeDB...${CL}"
 echo -e "${DGN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${CL}"
 
+# Note: LimeDB now requires mandatory node URL specification
+# The service is configured as a single-node cluster by default
+# For multi-node clusters, edit the systemd service file after installation
+
 # Install dependencies and LimeDB (optimized single operation)
 echo -ne " ${YW}Installing LimeDB (all steps)...${CL}"
 pct exec $CTID -- bash -c "
@@ -346,8 +350,14 @@ pct exec $CTID -- bash -c "
     # Download and install LimeDB
     wget -qO /usr/local/bin/limedb \"https://github.com/namanvashistha/limedb/releases/download/\${LATEST_VERSION}/limedb-linux-amd64\" &
     
+    # Get container IP for node URL
+    CONTAINER_IP=\$(ip route get 1 2>/dev/null | awk '{print \$7}' | head -1)
+    if [ -z \"\$CONTAINER_IP\" ]; then
+        CONTAINER_IP=\"localhost\"
+    fi
+    
     # Create systemd service while download happens
-    cat > /etc/systemd/system/limedb.service << 'EOF'
+    cat > /etc/systemd/system/limedb.service << EOF
 [Unit]
 Description=LimeDB Key-Value Store
 After=network.target
@@ -355,7 +365,7 @@ After=network.target
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/local/bin/limedb
+ExecStart=/usr/local/bin/limedb -server.port 8484 -node.url \"http://\${CONTAINER_IP}:8484\" -node.peers \"http://\${CONTAINER_IP}:8484\"
 Restart=on-failure
 RestartSec=10
 
@@ -380,6 +390,7 @@ EOF
   🌐 Access: http://\$(ip route get 1 | awk '{print \$7}' | head -1):8484
   📚 Documentation: https://github.com/namanvashistha/limedb
   🔧 Management: systemctl [start|stop|restart] limedb
+  📋 Node URL: http://\$(ip route get 1 | awk '{print \$7}' | head -1):8484
 
 MOTDEOF
     
@@ -454,6 +465,17 @@ echo -e "│ ${DGN}Start container:${CL}       pct start ${CTID}"
 echo -e "│ ${DGN}Restart LimeDB:${CL}        pct exec ${CTID} systemctl restart limedb"
 echo -e "│ ${DGN}View logs:${CL}             pct exec ${CTID} journalctl -u limedb -f"
 echo -e "│ ${DGN}Check status:${CL}          pct exec ${CTID} systemctl status limedb"
+echo -e "└─────────────────────────────────────────────────────┘"
+echo ""
+
+# Cluster Configuration
+echo -e "🔗 ${YW}Cluster Configuration${CL}"
+echo -e "┌─────────────────────────────────────────────────────┐"
+echo -e "│ ${YW}Single Node:${CL}           Currently configured"
+echo -e "│ ${YW}Multi-Node Setup:${CL}      Edit /etc/systemd/system/limedb.service"
+echo -e "│ ${YW}Node URL:${CL}              -node.url \"http://${IP}:8484\""
+echo -e "│ ${YW}Peers Example:${CL}         -node.peers \"http://ip1:8484,http://ip2:8484\""
+echo -e "│ ${DGN}Reload after edit:${CL}     systemctl daemon-reload && systemctl restart limedb"
 echo -e "└─────────────────────────────────────────────────────┘"
 echo ""
 
