@@ -19,12 +19,12 @@ type Config struct {
 func Load() *Config {
 	nodeID := flag.Int("node.id", 1, "Node ID")
 	serverPort := flag.Int("server.port", 7001, "Server Port")
-	peersStr := flag.String("node.peers", "http://localhost:7001", "Comma-separated list of peer URLs")
-	virtualNodes := flag.Int("node.routing.virtual-nodes", 150, "Number of virtual nodes per physical node")
+	peersStr := flag.String("node.peers", "http://localhost:7001,http://localhost:7002", "Comma-separated list of peer URLs")
+	virtualNodes := flag.Int("node.routing.virtual-nodes", 2, "Number of virtual nodes per physical node")
 
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n", os.Args[0])
-		fmt.Fprintf(flag.CommandLine.Output(), "  ./limedb-node -node.id <id> -server.port <port> [options]\n\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  ./limedb -node.id <id> -server.port <port> [options]\n\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "Options:\n")
 		flag.PrintDefaults()
 	}
