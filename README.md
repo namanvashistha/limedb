@@ -409,3 +409,10 @@ LimeDB draws inspiration from:
 - **Extensible** - Clean architecture for future enhancements
 
 **Ready to scale your key-value storage?** ⭐ Star the repo and get started!
+
+## Resources:
+- https://hazelcast.com/foundations/distributed-computing/cap-theorem/
+- https://www.julianbrowne.com/article/brewers-cap-theorem/
+- https://www.julianbrowne.com/
+- https://www.toptal.com/big-data/consistent-hashing
+- https://www.digitalocean.com/community/tutorials/understanding-database-sharding
