@@ -167,7 +167,12 @@ echo -e "${CM} ${GN}Template ${TEMPLATE_NAME} [${TEMPLATE_STORAGE}]${CL}"
 
 # Create container
 msg_info "Creating LXC Container"
-pct create $CTID $TEMPLATE_STORAGE:vztmpl/$OS_TEMPLATE \
+
+# Build the pct create command with proper template path
+TEMPLATE_PATH="${TEMPLATE_STORAGE}:vztmpl/${OS_TEMPLATE}"
+
+# Create container with timeout and better error handling
+timeout 120 pct create $CTID "$TEMPLATE_PATH" \
     --hostname limedb \
     --cores $var_cpu \
     --memory $var_ram \
@@ -177,39 +182,47 @@ pct create $CTID $TEMPLATE_STORAGE:vztmpl/$OS_TEMPLATE \
     --net0 name=eth0,bridge=vmbr0,ip=dhcp \
     --features nesting=1 \
     --unprivileged $var_unprivileged \
-    --rootfs $CONTAINER_STORAGE:${var_disk} &>/dev/null
+    --rootfs $CONTAINER_STORAGE:${var_disk} 2>/tmp/pct_error.log
 
-if [[ $? -eq 0 ]]; then
+CREATE_RESULT=$?
+
+if [[ $CREATE_RESULT -eq 0 ]]; then
     echo -e "${CM} ${GN}LXC Container ${CTID} was successfully created.${CL}"
+elif [[ $CREATE_RESULT -eq 124 ]]; then
+    msg_error "Container creation timed out after 2 minutes"
+    exit 1
 else
     msg_error "Failed to create container"
+    echo "Error details:"
+    cat /tmp/pct_error.log 2>/dev/null || echo "No error details available"
     exit 1
 fi
 
 # Start container
 msg_info "Starting LXC Container"
-pct start $CTID &>/dev/null
-echo -e "${CM} ${GN}Started LXC Container${CL}"
-
-# Wait for network
-msg_info "Waiting for network"
-for i in {1..30}; do
-    if pct exec $CTID -- ping -c1 8.8.8.8 &>/dev/null; then
-        break
-    fi
-    if [[ $i -lt 30 ]]; then
-        echo -ne " ${INFO} No network in LXC yet (try $i/30) – waiting..."
-        sleep 2
-        echo -ne "\r"
-    fi
-done
-
-if pct exec $CTID -- ping -c1 8.8.8.8 &>/dev/null; then
-    echo -e "${CM} ${GN}Network in LXC is reachable (ping)${CL}"
+if pct start $CTID 2>/dev/null; then
+    echo -e "${CM} ${GN}Started LXC Container${CL}"
 else
-    msg_error "Network not reachable after 60 seconds"
+    msg_error "Failed to start container"
     exit 1
 fi
+
+# Wait for container to be ready and network available
+for i in {1..10}; do
+    echo -ne " ${INFO} No network in LXC yet (try $i/10) – waiting..."
+    sleep 3
+    if pct exec $CTID -- ping -c1 8.8.8.8 &>/dev/null; then
+        echo -ne "\r"
+        echo -e "${CM} ${GN}Network in LXC is reachable (ping)${CL}"
+        break
+    fi
+    echo -ne "\r"
+    if [[ $i -eq 10 ]]; then
+        msg_error "Network not reachable after 30 seconds"
+        echo "Container may still be starting up. You can check later with: pct enter $CTID"
+        exit 1
+    fi
+done
 
 # Get container IP
 IP=$(pct exec $CTID -- ip route get 1 2>/dev/null | awk '{print $7}' | head -1)
