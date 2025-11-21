@@ -100,11 +100,11 @@ proxmox/
    pct enter <container-id>
    
    # Check services
-   systemctl status limedb otelcol
+   systemctl status limedb otel-collector
    
    # View logs
    journalctl -u limedb -f
-   journalctl -u otelcol -f
+   journalctl -u otel-collector -f
    ```
 
 The LXC script will automatically detect and use your `~/.grafana/config` file, pre-configuring the OTEL Collector with your Grafana Cloud credentials!

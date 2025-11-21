@@ -513,7 +513,7 @@ CONFIGUREDENV
     fi
 
     # Create OTEL Collector systemd service
-    cat > /etc/systemd/system/otelcol.service << 'OTELSVC'
+    cat > /etc/systemd/system/otel-collector.service << 'OTELSVC'
 [Unit]
 Description=OpenTelemetry Collector
 After=network.target
@@ -536,8 +536,8 @@ OTELSVC
     cat > /etc/systemd/system/limedb.service << EOF
 [Unit]
 Description=LimeDB Key-Value Store
-After=network.target otelcol.service
-Wants=otelcol.service
+After=network.target otel-collector.service
+Wants=otel-collector.service
 
 [Service]
 Type=simple
@@ -575,7 +575,7 @@ EOF
   🌐 LimeDB: http://\$(ip route get 1 | awk '{print \$7}' | head -1):8484
   📊 OTEL: http://\$(ip route get 1 | awk '{print \$7}' | head -1):4317 (gRPC), :4318 (HTTP)
   📚 Documentation: https://github.com/namanvashistha/limedb
-  🔧 Management: systemctl [start|stop|restart] [limedb|otelcol]
+  🔧 Management: systemctl [start|stop|restart] [limedb|otel-collector]
   📋 Node URL: http://\$(ip route get 1 | awk '{print \$7}' | head -1):8484
   
   ⚙️  Configure Grafana Cloud: /etc/otelcol/environment
@@ -611,13 +611,18 @@ AUTOEOF2
     chmod +x /usr/local/bin/otelcol
     rm -f otelcol.tar.gz
     
-    # Enable services (OTEL Collector disabled by default until configured)
+    # Enable services
     systemctl daemon-reload
     systemctl enable limedb.service &>/dev/null
-    systemctl enable otelcol.service &>/dev/null
+    systemctl enable otel-collector.service &>/dev/null
     
-    # Start LimeDB (OTEL will be started manually after configuration)
+    # Start services
     systemctl start limedb.service &>/dev/null
+    
+    # Start OTEL Collector if credentials are configured
+    if [[ -n \"${GRAFANA_CLOUD_USERNAME}\" && -n \"${GRAFANA_CLOUD_PASSWORD}\" && -n \"${GRAFANA_OTLP_ENDPOINT}\" ]]; then
+        systemctl start otel-collector.service &>/dev/null
+    fi
     
     echo \"\$LATEST_VERSION\"
 "
@@ -662,10 +667,10 @@ echo -e "│ ${DGN}Enter container:${CL}       pct enter ${CTID}"
 echo -e "│ ${DGN}Stop container:${CL}        pct stop ${CTID}"
 echo -e "│ ${DGN}Start container:${CL}       pct start ${CTID}"
 echo -e "│ ${DGN}Restart LimeDB:${CL}        pct exec ${CTID} systemctl restart limedb"
-echo -e "│ ${DGN}Restart OTEL:${CL}          pct exec ${CTID} systemctl restart otelcol"
+echo -e "│ ${DGN}Restart OTEL:${CL}          pct exec ${CTID} systemctl restart otel-collector"
 echo -e "│ ${DGN}View LimeDB logs:${CL}      pct exec ${CTID} journalctl -u limedb -f"
-echo -e "│ ${DGN}View OTEL logs:${CL}        pct exec ${CTID} journalctl -u otelcol -f"
-echo -e "│ ${DGN}Check status:${CL}          pct exec ${CTID} systemctl status limedb otelcol"
+echo -e "│ ${DGN}View OTEL logs:${CL}        pct exec ${CTID} journalctl -u otel-collector -f"
+echo -e "│ ${DGN}Check status:${CL}          pct exec ${CTID} systemctl status limedb otel-collector"
 echo -e "└─────────────────────────────────────────────────────┘"
 echo ""
 
@@ -674,14 +679,14 @@ echo -e "📊 ${YW}OpenTelemetry Configuration${CL}"
 echo -e "┌─────────────────────────────────────────────────────┐"
 if [[ -n "$GRAFANA_CLOUD_USERNAME" ]]; then
 echo -e "│ ${YW}Status:${CL}                ✅ Pre-configured from environment"
-echo -e "│ ${DGN}Start OTEL:${CL}             pct exec ${CTID} systemctl start otelcol"
+echo -e "│ ${DGN}Start OTEL:${CL}             pct exec ${CTID} systemctl start otel-collector"
 else
 echo -e "│ ${YW}Status:${CL}                ⚙️  Manual configuration required"
 echo -e "│ ${YW}Config File:${CL}           /etc/otelcol/environment"
 echo -e "│ ${YW}Template:${CL}              /etc/otelcol/environment.template"
 echo -e "│ ${DGN}Enter container:${CL}       pct enter ${CTID}"
 echo -e "│ ${DGN}Edit credentials:${CL}       vi /etc/otelcol/environment"
-echo -e "│ ${DGN}Start OTEL:${CL}             systemctl start otelcol"
+echo -e "│ ${DGN}Start OTEL:${CL}             systemctl start otel-collector"
 fi
 echo -e "└─────────────────────────────────────────────────────┘"
 echo ""
