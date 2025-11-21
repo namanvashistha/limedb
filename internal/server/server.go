@@ -1,12 +1,19 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"limedb-go/internal/node"
 	"log"
 
+	"time"
+
 	"github.com/valyala/fasthttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Server represents the HTTP server.
@@ -14,22 +21,44 @@ type Server struct {
 	service    *node.NodeService
 	port       int
 	httpServer *fasthttp.Server
+	tracer     trace.Tracer
+	meter      metric.Meter
+	reqCounter metric.Int64Counter
+	reqLatency metric.Float64Histogram
 }
 
 // New creates a new HTTP server.
 func New(service *node.NodeService, port int) *Server {
+	meter := otel.Meter("limedb-node")
+
+	reqCounter, _ := meter.Int64Counter(
+		"http.server.request_count",
+		metric.WithDescription("Total number of HTTP requests"),
+		metric.WithUnit("{request}"),
+	)
+
+	reqLatency, _ := meter.Float64Histogram(
+		"http.server.request_duration",
+		metric.WithDescription("Duration of HTTP requests"),
+		metric.WithUnit("ms"),
+	)
+
 	return &Server{
 		service: service,
 		port:    port,
 		httpServer: &fasthttp.Server{
 			Handler: nil, // Will be set in Start or here
 		},
+		tracer:     otel.Tracer("limedb-node"),
+		meter:      meter,
+		reqCounter: reqCounter,
+		reqLatency: reqLatency,
 	}
 }
 
 // Start starts the HTTP server.
 func (s *Server) Start() error {
-	s.httpServer.Handler = s.router
+	s.httpServer.Handler = s.traceMiddleware(s.router)
 	addr := fmt.Sprintf(":%d", s.port)
 	log.Printf("Starting HTTP server on %s", addr)
 	return s.httpServer.ListenAndServe(addr)
@@ -38,6 +67,64 @@ func (s *Server) Start() error {
 // Shutdown gracefully shuts down the HTTP server.
 func (s *Server) Shutdown() error {
 	return s.httpServer.Shutdown()
+}
+
+// traceMiddleware wraps the router to add OTel tracing.
+func (s *Server) traceMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
+	return func(ctx *fasthttp.RequestCtx) {
+		// Extract trace context from headers
+		propagator := otel.GetTextMapPropagator()
+		// Adapter to allow OTel to read headers from fasthttp
+		headerCarrier := &fasthttpHeaderCarrier{ctx: ctx}
+		parentCtx := propagator.Extract(context.Background(), headerCarrier)
+
+		// Start a new span
+		path := string(ctx.Path())
+		method := string(ctx.Method())
+		spanName := fmt.Sprintf("%s %s", method, path)
+
+		startTime := time.Now()
+		tracedCtx, span := s.tracer.Start(parentCtx, spanName)
+		defer span.End()
+
+		// Store the traced context in the UserValue so handlers can access it if needed
+		// Note: fasthttp doesn't use context.Context natively for cancellation in the same way net/http does,
+		// but we need it for OTel propagation.
+		ctx.SetUserValue("tracedCtx", tracedCtx)
+
+		next(ctx)
+
+		// Record metrics
+		duration := float64(time.Since(startTime).Milliseconds())
+		status := ctx.Response.StatusCode()
+
+		attrs := metric.WithAttributes(
+			attribute.String("http.method", method),
+			attribute.String("http.route", path),
+			attribute.Int("http.status_code", status),
+		)
+
+		s.reqCounter.Add(tracedCtx, 1, attrs)
+		s.reqLatency.Record(tracedCtx, duration, attrs)
+	}
+}
+
+// fasthttpHeaderCarrier adapts fasthttp.RequestCtx to propagation.TextMapCarrier
+type fasthttpHeaderCarrier struct {
+	ctx *fasthttp.RequestCtx
+}
+
+func (c *fasthttpHeaderCarrier) Get(key string) string {
+	return string(c.ctx.Request.Header.Peek(key))
+}
+
+func (c *fasthttpHeaderCarrier) Set(key, value string) {
+	c.ctx.Response.Header.Set(key, value)
+}
+
+func (c *fasthttpHeaderCarrier) Keys() []string {
+	// Not efficiently supported by fasthttp, but rarely needed for Extract
+	return nil
 }
 
 // router handles incoming HTTP requests.
@@ -56,6 +143,8 @@ func (s *Server) router(ctx *fasthttp.RequestCtx) {
 		s.handleClusterState(ctx)
 	case method == "GET" && path == "/api/v1/cluster/ring":
 		s.handleRingState(ctx)
+	case method == "GET" && path == "/api/v1/health":
+		s.handleHealth(ctx)
 	default:
 		ctx.Error("Not Found", fasthttp.StatusNotFound)
 	}
@@ -124,6 +213,20 @@ func (s *Server) handleRingState(ctx *fasthttp.RequestCtx) {
 	stats["rangesDegrees"] = ring.GetNodeRangesDegrees()
 
 	body, _ := json.Marshal(stats)
+	ctx.SetContentType("application/json")
+	ctx.SetBody(body)
+}
+
+func (s *Server) handleHealth(ctx *fasthttp.RequestCtx) {
+	health := map[string]interface{}{
+		"status":    "healthy",
+		"service":   "limedb-node",  
+		"version":   "1.0.0",
+		"nodeUrl":   s.service.GetNodeUrl(),
+		"timestamp": time.Now().Format(time.RFC3339),
+	}
+
+	body, _ := json.Marshal(health)
 	ctx.SetContentType("application/json")
 	ctx.SetBody(body)
 }

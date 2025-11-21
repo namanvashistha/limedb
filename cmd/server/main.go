@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"limedb-go/internal/config"
 	"limedb-go/internal/node"
 	"limedb-go/internal/server"
+	"limedb-go/internal/telemetry"
 	"log"
 	"os"
 	"os/signal"
@@ -14,19 +16,30 @@ import (
 func main() {
 	// Configure logging with timestamps
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	
+
 	// Load configuration
 	cfg := config.Load()
 
+	// Initialize Telemetry
+	shutdownTelemetry, err := telemetry.Init("limedb-node", "1.0.0", cfg.OtelEndpoint)
+	if err != nil {
+		log.Fatalf("Failed to initialize telemetry: %v", err)
+	}
+	defer func() {
+		if err := shutdownTelemetry(context.Background()); err != nil {
+			log.Printf("Error shutting down telemetry: %v", err)
+		}
+	}()
+
 	// Display startup banner
 	printStartupBanner()
-	
+
 	// Log configuration details
 	log.Printf("🚀 Starting LimeDB Node")
 	log.Printf("   Node URL: %s", cfg.NodeUrl)
 	log.Printf("   Server Port: %d", cfg.ServerPort)
 	log.Printf("   Virtual Nodes: %d", cfg.VirtualNodes)
-	
+
 	if len(cfg.Peers) > 0 {
 		log.Printf("   Cluster Peers: %d nodes", len(cfg.Peers))
 		for i, peer := range cfg.Peers {
@@ -55,7 +68,7 @@ func main() {
 		log.Printf("   Health endpoint: http://localhost:%d/api/v1/health", cfg.ServerPort)
 		log.Printf("   API endpoint: http://localhost:%d/api/v1/", cfg.ServerPort)
 		serverStarted <- true
-		
+
 		if err := srv.Start(); err != nil {
 			log.Printf("❌ Server error: %v", err)
 		}

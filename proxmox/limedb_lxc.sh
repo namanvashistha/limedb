@@ -39,6 +39,17 @@ var_version="${var_version:-12}"
 var_unprivileged="${var_unprivileged:-1}"
 PASSWORD="password"
 
+# Grafana Cloud Configuration - Read from ~/.grafana/ if available
+GRAFANA_CONFIG_DIR="$HOME/.grafana"
+if [[ -f "$GRAFANA_CONFIG_DIR/config" ]]; then
+    source "$GRAFANA_CONFIG_DIR/config"
+fi
+
+# Environment variable fallbacks
+GRAFANA_OTLP_ENDPOINT="${GRAFANA_OTLP_ENDPOINT:-}"
+GRAFANA_CLOUD_USERNAME="${GRAFANA_CLOUD_USERNAME:-}"
+GRAFANA_CLOUD_PASSWORD="${GRAFANA_CLOUD_PASSWORD:-}"
+
 # Functions
 function msg_info() {
     local msg="$1"
@@ -99,6 +110,7 @@ echo -e "│ ${YW}Type:${CL}           $([ "$var_unprivileged" == "1" ] && echo 
 echo -e "│ ${YW}Storage:${CL}        ${var_disk} GB"
 echo -e "│ ${YW}CPU Cores:${CL}      ${var_cpu}"
 echo -e "│ ${YW}Memory:${CL}         ${var_ram} MiB"
+echo -e "│ ${YW}Grafana Cloud:${CL}   $([ -n "$GRAFANA_CLOUD_USERNAME" ] && echo "✅ Auto-configured" || echo "⚙️  Manual setup required")"
 echo -e "└─────────────────────────────────────────────────────┘"
 echo ""
 echo -e "${CREATING} ${GN}Initializing ${APP} container deployment...${CL}"
@@ -324,21 +336,22 @@ else
     IP=$(pct exec $CTID -- ip route get 1 2>/dev/null | awk '{print $7}' | head -1)
 fi
 
-# Install LimeDB in container
+# Install LimeDB and OTEL Collector in container
 echo ""
-echo -e "📦 ${YW}Installing LimeDB...${CL}"
+echo -e "📦 ${YW}Installing LimeDB + OpenTelemetry Collector...${CL}"
 echo -e "${DGN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${CL}"
 
 # Note: LimeDB now requires mandatory node URL specification
 # The service is configured as a single-node cluster by default
+# OTEL Collector will be installed to forward telemetry to Grafana Cloud
 # For multi-node clusters, edit the systemd service file after installation
 
-# Install dependencies and LimeDB (optimized single operation)
-echo -ne " ${YW}Installing LimeDB (all steps)...${CL}"
+# Install dependencies, LimeDB, and OTEL Collector (optimized single operation)
+echo -ne " ${YW}Installing LimeDB + OTEL Collector (all steps)...${CL}"
 pct exec $CTID -- bash -c "
     # Update and install dependencies
     apt-get update &>/dev/null
-    apt-get install -y curl ca-certificates wget &>/dev/null
+    apt-get install -y curl ca-certificates wget tar &>/dev/null
     
     # Get latest version and download in parallel
     LATEST_VERSION=\$(curl -s https://api.github.com/repos/namanvashistha/limedb/releases/latest | grep '\"tag_name\":' | sed -E 's/.*\"([^\"]+)\".*/\1/')
@@ -347,8 +360,13 @@ pct exec $CTID -- bash -c "
         LATEST_VERSION=\"v0.0.2\"
     fi
     
-    # Download and install LimeDB
+    # Download LimeDB and OTEL Collector in parallel
     wget -qO /usr/local/bin/limedb \"https://github.com/namanvashistha/limedb/releases/download/\${LATEST_VERSION}/limedb-linux-amd64\" &
+    LIMEDB_PID=\$!
+    
+    # Download OTEL Collector
+    wget -qO /tmp/otelcol.tar.gz \"https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.91.0/otelcol_0.91.0_linux_amd64.tar.gz\" &
+    OTEL_PID=\$!
     
     # Get container IP for node URL
     CONTAINER_IP=\$(ip route get 1 2>/dev/null | awk '{print \$7}' | head -1)
@@ -356,18 +374,184 @@ pct exec $CTID -- bash -c "
         CONTAINER_IP=\"localhost\"
     fi
     
-    # Create systemd service while download happens
-    cat > /etc/systemd/system/limedb.service << EOF
+    # Create OTEL Collector directories and config
+    mkdir -p /etc/otelcol /var/log/otelcol
+    
+    # Create OTEL Collector configuration (production-ready)
+    cat > /etc/otelcol/config.yaml << 'OTELCONF'
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+  resourcedetection:
+    detectors: [\"env\", \"system\"]
+    override: false
+  transform/drop_unneeded_resource_attributes:
+    error_mode: ignore
+    trace_statements:
+      - context: resource
+        statements:
+          - delete_key(attributes, \"k8s.pod.start_time\")
+          - delete_key(attributes, \"os.description\")
+          - delete_key(attributes, \"os.type\")
+          - delete_key(attributes, \"process.command_args\")
+          - delete_key(attributes, \"process.executable.path\")
+          - delete_key(attributes, \"process.pid\")
+          - delete_key(attributes, \"process.runtime.description\")
+          - delete_key(attributes, \"process.runtime.name\")
+          - delete_key(attributes, \"process.runtime.version\")
+    metric_statements:
+      - context: resource
+        statements:
+          - delete_key(attributes, \"k8s.pod.start_time\")
+          - delete_key(attributes, \"os.description\")
+          - delete_key(attributes, \"os.type\")
+          - delete_key(attributes, \"process.command_args\")
+          - delete_key(attributes, \"process.executable.path\")
+          - delete_key(attributes, \"process.pid\")
+          - delete_key(attributes, \"process.runtime.description\")
+          - delete_key(attributes, \"process.runtime.name\")
+          - delete_key(attributes, \"process.runtime.version\")
+    log_statements:
+      - context: resource
+        statements:
+          - delete_key(attributes, \"k8s.pod.start_time\")
+          - delete_key(attributes, \"os.description\")
+          - delete_key(attributes, \"os.type\")
+          - delete_key(attributes, \"process.command_args\")
+          - delete_key(attributes, \"process.executable.path\")
+          - delete_key(attributes, \"process.pid\")
+          - delete_key(attributes, \"process.runtime.description\")
+          - delete_key(attributes, \"process.runtime.name\")
+          - delete_key(attributes, \"process.runtime.version\")
+  transform/add_resource_attributes_as_metric_attributes:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(attributes[\"deployment.environment\"], resource.attributes[\"deployment.environment\"])
+          - set(attributes[\"service.version\"], resource.attributes[\"service.version\"])
+
+exporters:
+  otlphttp/grafana_cloud:
+    endpoint: \"\${GRAFANA_OTLP_ENDPOINT}\"
+    auth:
+      authenticator: basicauth/grafana_cloud
+
+extensions:
+  basicauth/grafana_cloud:
+    client_auth:
+      username: \"\${GRAFANA_CLOUD_USERNAME}\"
+      password: \"\${GRAFANA_CLOUD_PASSWORD}\"
+
+connectors:
+  grafanacloud:
+    host_identifiers: [\"host.name\"]
+
+service:
+  extensions: [basicauth/grafana_cloud]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [resourcedetection, transform/drop_unneeded_resource_attributes, batch]
+      exporters: [otlphttp/grafana_cloud, grafanacloud]
+    metrics:
+      receivers: [otlp]
+      processors: [resourcedetection, transform/drop_unneeded_resource_attributes, transform/add_resource_attributes_as_metric_attributes, batch]
+      exporters: [otlphttp/grafana_cloud]
+    metrics/grafanacloud:
+      receivers: [grafanacloud]
+      processors: [batch]
+      exporters: [otlphttp/grafana_cloud]
+    logs:
+      receivers: [otlp]
+      processors: [resourcedetection, transform/drop_unneeded_resource_attributes, batch]
+      exporters: [otlphttp/grafana_cloud]
+OTELCONF
+
+    # Create OTEL environment template
+    cat > /etc/otelcol/environment.template << 'ENVTEMPLATE'
+# Grafana Cloud Configuration - CONFIGURE THESE VALUES
+# Get these from your Grafana Cloud account:
+# 1. Go to Connections -> Add new connection -> OpenTelemetry
+# 2. Copy the OTLP endpoint URL (varies by region)
+# 3. Generate access token with metrics and traces permissions
+# 4. Use your instance ID as username and access token as password
+
+# Examples (replace with your actual endpoints):
+# US East: https://otlp-gateway-prod-us-east-0.grafana.net/otlp
+# EU West: https://otlp-gateway-prod-eu-west-0.grafana.net/otlp
+# US Central: https://otlp-gateway-prod-us-central-0.grafana.net/otlp
+# AP South: https://otlp-gateway-prod-ap-south-1.grafana.net/otlp
+
+GRAFANA_OTLP_ENDPOINT=your_otlp_endpoint_here
+GRAFANA_CLOUD_USERNAME=your_instance_id_here
+GRAFANA_CLOUD_PASSWORD=your_access_token_here
+HOSTNAME=limedb-node
+ENVTEMPLATE
+
+    # Create default environment with dynamic values from script environment
+    if [[ -n \"${GRAFANA_CLOUD_USERNAME}\" && -n \"${GRAFANA_CLOUD_PASSWORD}\" && -n \"${GRAFANA_OTLP_ENDPOINT}\" ]]; then
+        # Use configured values
+        cat > /etc/otelcol/environment << CONFIGUREDENV
+# OTEL Collector Environment Variables
+# Configured automatically from ~/.grafana/config
+GRAFANA_OTLP_ENDPOINT=${GRAFANA_OTLP_ENDPOINT}
+GRAFANA_CLOUD_USERNAME=${GRAFANA_CLOUD_USERNAME}
+GRAFANA_CLOUD_PASSWORD=${GRAFANA_CLOUD_PASSWORD}
+HOSTNAME=limedb-node
+CONFIGUREDENV
+    else
+        # Use template values for manual configuration
+        cp /etc/otelcol/environment.template /etc/otelcol/environment
+    fi
+
+    # Create OTEL Collector systemd service
+    cat > /etc/systemd/system/otelcol.service << 'OTELSVC'
 [Unit]
-Description=LimeDB Key-Value Store
+Description=OpenTelemetry Collector
 After=network.target
 
 [Service]
 Type=simple
 User=root
+EnvironmentFile=/etc/otelcol/environment
+ExecStart=/usr/local/bin/otelcol --config=/etc/otelcol/config.yaml
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+OTELSVC
+
+    # Create LimeDB systemd service with OTEL integration
+    cat > /etc/systemd/system/limedb.service << EOF
+[Unit]
+Description=LimeDB Key-Value Store
+After=network.target otelcol.service
+Wants=otelcol.service
+
+[Service]
+Type=simple
+User=root
+Environment=OTEL_ENABLED=true
+Environment=OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+Environment=OTEL_SERVICE_NAME=limedb
+Environment=OTEL_SERVICE_VERSION=v0.0.6
+Environment=OTEL_ENVIRONMENT=production
 ExecStart=/usr/local/bin/limedb -server.port 8484 -node.url \"http://\${CONTAINER_IP}:8484\" -node.peers \"http://\${CONTAINER_IP}:8484\"
 Restart=on-failure
 RestartSec=10
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
@@ -384,13 +568,17 @@ EOF
   │/_____/_/_/ /_/ /_/\___/_____/_____/                 │
   │                                                     │
   │        Fast Key-Value Store for Modern Apps        │
+  │             + OpenTelemetry Integration             │
   │                                                     │
   ╰─────────────────────────────────────────────────────╯
 
-  🌐 Access: http://\$(ip route get 1 | awk '{print \$7}' | head -1):8484
+  🌐 LimeDB: http://\$(ip route get 1 | awk '{print \$7}' | head -1):8484
+  📊 OTEL: http://\$(ip route get 1 | awk '{print \$7}' | head -1):4317 (gRPC), :4318 (HTTP)
   📚 Documentation: https://github.com/namanvashistha/limedb
-  🔧 Management: systemctl [start|stop|restart] limedb
+  🔧 Management: systemctl [start|stop|restart] [limedb|otelcol]
   📋 Node URL: http://\$(ip route get 1 | awk '{print \$7}' | head -1):8484
+  
+  ⚙️  Configure Grafana Cloud: /etc/otelcol/environment
 
 MOTDEOF
     
@@ -413,23 +601,33 @@ AUTOEOF2
     # Reload systemd to apply auto-login
     systemctl daemon-reload
     
-    # Wait for download to complete
-    wait
+    # Wait for downloads to complete and install
+    wait \$LIMEDB_PID
     chmod +x /usr/local/bin/limedb
     
-    # Enable and start service
+    wait \$OTEL_PID
+    cd /tmp && tar -xzf otelcol.tar.gz
+    mv otelcol /usr/local/bin/
+    chmod +x /usr/local/bin/otelcol
+    rm -f otelcol.tar.gz
+    
+    # Enable services (OTEL Collector disabled by default until configured)
     systemctl daemon-reload
-    systemctl enable --now limedb.service &>/dev/null
+    systemctl enable limedb.service &>/dev/null
+    systemctl enable otelcol.service &>/dev/null
+    
+    # Start LimeDB (OTEL will be started manually after configuration)
+    systemctl start limedb.service &>/dev/null
     
     echo \"\$LATEST_VERSION\"
 "
 INSTALLED_VERSION=\$?
-echo -e "\r${CM} ${GN}LimeDB installation completed${CL}"
+echo -e "\r${CM} ${GN}LimeDB + OTEL Collector installation completed${CL}"
 
 # Final output
 echo ""
 echo -e "${DGN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${CL}"
-echo -e "${SUCCESS} ${GN}LimeDB installation completed successfully!${CL}"
+echo -e "${SUCCESS} ${GN}LimeDB + OTEL Collector installation completed successfully!${CL}"
 echo -e "${DGN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${CL}"
 echo ""
 
@@ -450,9 +648,10 @@ echo ""
 # Access Information
 echo -e "🌐 ${YW}Access Information${CL}"
 echo -e "┌─────────────────────────────────────────────────────┐"
-echo -e "│ ${YW}Web Interface:${CL}  ${GATEWAY}http://${IP}:8484${CL}"
-echo -e "│ ${YW}API Endpoint:${CL}   ${GATEWAY}http://${IP}:8484${CL}"
+echo -e "│ ${YW}LimeDB API:${CL}     ${GATEWAY}http://${IP}:8484${CL}"
 echo -e "│ ${YW}Health Check:${CL}   ${GATEWAY}curl http://${IP}:8484${CL}"
+echo -e "│ ${YW}OTEL gRPC:${CL}      ${GATEWAY}http://${IP}:4317${CL}"
+echo -e "│ ${YW}OTEL HTTP:${CL}      ${GATEWAY}http://${IP}:4318${CL}"
 echo -e "└─────────────────────────────────────────────────────┘"
 echo ""
 
@@ -463,8 +662,27 @@ echo -e "│ ${DGN}Enter container:${CL}       pct enter ${CTID}"
 echo -e "│ ${DGN}Stop container:${CL}        pct stop ${CTID}"
 echo -e "│ ${DGN}Start container:${CL}       pct start ${CTID}"
 echo -e "│ ${DGN}Restart LimeDB:${CL}        pct exec ${CTID} systemctl restart limedb"
-echo -e "│ ${DGN}View logs:${CL}             pct exec ${CTID} journalctl -u limedb -f"
-echo -e "│ ${DGN}Check status:${CL}          pct exec ${CTID} systemctl status limedb"
+echo -e "│ ${DGN}Restart OTEL:${CL}          pct exec ${CTID} systemctl restart otelcol"
+echo -e "│ ${DGN}View LimeDB logs:${CL}      pct exec ${CTID} journalctl -u limedb -f"
+echo -e "│ ${DGN}View OTEL logs:${CL}        pct exec ${CTID} journalctl -u otelcol -f"
+echo -e "│ ${DGN}Check status:${CL}          pct exec ${CTID} systemctl status limedb otelcol"
+echo -e "└─────────────────────────────────────────────────────┘"
+echo ""
+
+# OpenTelemetry Configuration
+echo -e "📊 ${YW}OpenTelemetry Configuration${CL}"
+echo -e "┌─────────────────────────────────────────────────────┐"
+if [[ -n "$GRAFANA_CLOUD_USERNAME" ]]; then
+echo -e "│ ${YW}Status:${CL}                ✅ Pre-configured from environment"
+echo -e "│ ${DGN}Start OTEL:${CL}             pct exec ${CTID} systemctl start otelcol"
+else
+echo -e "│ ${YW}Status:${CL}                ⚙️  Manual configuration required"
+echo -e "│ ${YW}Config File:${CL}           /etc/otelcol/environment"
+echo -e "│ ${YW}Template:${CL}              /etc/otelcol/environment.template"
+echo -e "│ ${DGN}Enter container:${CL}       pct enter ${CTID}"
+echo -e "│ ${DGN}Edit credentials:${CL}       vi /etc/otelcol/environment"
+echo -e "│ ${DGN}Start OTEL:${CL}             systemctl start otelcol"
+fi
 echo -e "└─────────────────────────────────────────────────────┘"
 echo ""
 
@@ -481,3 +699,10 @@ echo ""
 
 echo -e "${SUCCESS} ${GN}Enjoy using LimeDB!${CL} ${DGN}Visit: https://github.com/namanvashistha/limedb${CL}"
 echo ""
+
+# Show configuration helper information if credentials not configured
+if [[ -z "$GRAFANA_CLOUD_USERNAME" ]]; then
+    echo -e "💡 ${YW}Tip: Use the configuration helper for easy Grafana Cloud setup:${CL}"
+    echo -e "   ${BL}bash proxmox/configure-grafana.sh${CL}"
+    echo ""
+fi
