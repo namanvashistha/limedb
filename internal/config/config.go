@@ -17,7 +17,7 @@ type Config struct {
 // Load parses command line arguments and returns the configuration.
 func Load() *Config {
 	serverPort := flag.Int("server.port", 8484, "Server Port")
-	peersStr := flag.String("node.peers", "http://localhost:8484,http://localhost:7002", "Comma-separated list of peer URLs")
+	peersStr := flag.String("node.peers", "", "Comma-separated list of peer URLs")
 	virtualNodes := flag.Int("node.routing.virtual-nodes", 2, "Number of virtual nodes per physical node")
 
 	flag.Usage = func() {
