@@ -5,8 +5,6 @@
 </div>
 <br>
 
-> **🚧 Migration Notice**: We are in the process of migrating LimeDB from Java to **Go** for better performance, lower memory footprint, and simpler deployment. The Go implementation will maintain API compatibility while offering significant improvements in resource efficiency and operational simplicity. The current Java implementation remains fully functional and will continue to receive maintenance updates during the transition period.
-
 ## LimeDB
 
 **LimeDB** is a **highly-scalable distributed key-value store**.
@@ -16,10 +14,6 @@ It operates in a peer-to-peer architecture where any node can act as both coordi
 Keys are consistently hashed across multiple nodes using virtual node topology for optimal load distribution and minimal data movement during cluster changes.
 
 Built as a hands-on learning platform for distributed systems fundamentals, LimeDB currently implements peer-to-peer routing and complete hash ring topology. Planned features include automatic failover, gossip protocol, consensus protocols, dynamic rebalancing, and evolution from PostgreSQL persistence toward custom LSM tree storage engines.
-
----
-
-> **🚧 Migration Notice**: We are in the process of migrating LimeDB from Java to **Go** for better performance, lower memory footprint, and simpler deployment. The Go implementation will maintain API compatibility while offering significant improvements in resource efficiency and operational simplicity. The current Java implementation remains fully functional and will continue to receive maintenance updates during the transition period.
 
 
 ## Roadmap
@@ -92,16 +86,19 @@ Built as a hands-on learning platform for distributed systems fundamentals, Lime
 ```
 
 **Routing Logic (Consistent Hashing):**  
-```java
-// Virtual nodes for better distribution (150 per physical node)
-String targetNode = consistentHashRing.getNode(key);
-if (targetNode.equals(currentNodeUrl)) handleLocally();
-else forwardToNode(targetNode);
+```go
+// Virtual nodes for better distribution across physical nodes
+targetNode := ring.GetNode(key)
+if targetNode == currentNodeUrl {
+    handleLocally()
+} else {
+    forwardToNode(targetNode)
+}
 
 // Hash ring automatically handles:
 // - Load balancing across nodes
 // - Minimal data movement when nodes are added/removed
-// - 360-degree visualization for debugging
+// - MD5-based consistent hashing
 ```
 
 ---
@@ -110,16 +107,21 @@ else forwardToNode(targetNode);
 
 ```
 limedb/
-├── app/src/main/java/org/limedb/
-│   ├── App.java              # Main Spring Boot application
-│   └── node/
-│       ├── config/           # Database & RestTemplate configuration
-│       └── core/
-│           ├── controller/   # Node REST API (peer-to-peer)
-│           ├── dto/          # Data transfer objects
-│           ├── model/        # Entry (key-value) entity
-│           ├── repository/   # JPA repositories
-│           └── service/      # Node business logic & routing
+├── cmd/
+│   └── server/
+│       └── main.go           # Main application entry point
+├── internal/
+│   ├── config/
+│   │   └── config.go         # Configuration management
+│   ├── node/
+│   │   ├── service.go        # Node business logic & routing
+│   │   └── store.go          # Storage interface
+│   ├── ring/
+│   │   └── ring.go           # Consistent hashing implementation
+│   └── server/
+│       └── server.go         # HTTP server & API handlers
+├── tui/                      # Terminal UI for monitoring
+├── proxmox/                  # Proxmox LXC deployment scripts
 └── README.md
 ```
 
@@ -128,29 +130,39 @@ limedb/
 ## Quick Start
 
 ### Prerequisites
-- **Java 21**
+- **Go 1.21+**
 - **PostgreSQL 14+** running on localhost:5432
-- **Databases created**: `limedb_node_1`, `limedb_node_2`, `limedb_node_3`
+- **Database created**: `limedb`
 
 ```bash
 # Quick database setup
 ./setup-postgres.sh
 ```
 
-### 1. Start Peer Nodes
+### 1. Build and Start Cluster
+
+```bash
+# Build the binary
+go build -o build/limedb ./cmd/server/main.go
+
+# Start a 3-node cluster
+NUM_NODES=3 ./run_go_cluster.sh
+```
+
+### 2. Start Individual Nodes
 
 ```bash
 # Terminal 1: Node 1
-./gradlew bootRun --args='--server.port=7001 --node.id=1'
+./build/limedb -server.port 7001 -node.url "http://localhost:7001" -node.peers "http://localhost:7001,http://localhost:7002,http://localhost:7003"
 
 # Terminal 2: Node 2  
-./gradlew bootRun --args='--server.port=7002 --node.id=2'
+./build/limedb -server.port 7002 -node.url "http://localhost:7002" -node.peers "http://localhost:7001,http://localhost:7002,http://localhost:7003"
 
 # Terminal 3: Node 3
-./gradlew bootRun --args='--server.port=7003 --node.id=3'
+./build/limedb -server.port 7003 -node.url "http://localhost:7003" -node.peers "http://localhost:7001,http://localhost:7002,http://localhost:7003"
 ```
 
-### 2. Test the API (Connect to ANY node)
+### 3. Test the API (Connect to ANY node)
 
 **Single Request:**
 ```bash
@@ -166,10 +178,10 @@ curl http://localhost:7001/api/v1/get/user:123
 curl -X DELETE http://localhost:7001/api/v1/del/user:123
 
 # Check cluster state (shows all active nodes)
-curl http://localhost:7001/cluster/state
+curl http://localhost:7001/api/v1/cluster/state
 
-# Check hash ring statistics and ranges
-curl http://localhost:7001/cluster/ring
+# Health check
+curl http://localhost:7001/health
 ```
 
 **Concurrent Load Testing:**
@@ -185,47 +197,48 @@ python bulk_set.py
 ## 🐳 Docker Deployment
 
 ### Container Specifications
-- **Base Image**: Amazon Corretto 21 Alpine
-- **Size**: 384MB (47% smaller than standard images)
-- **Memory**: 256MB-1GB heap (configurable)
+- **Base Image**: Alpine Linux with Go binary
+- **Size**: <50MB (ultra-lightweight)
+- **Memory**: Low memory footprint (configurable)
 - **Security**: Non-root user, minimal attack surface
-- **Signals**: Proper signal handling with dumb-init
+- **Performance**: Native Go binary performance
 
 ### Development Setup
 ```bash
-# Build optimized image
-docker build -t limedb:latest .
+# Pull from Docker Hub
+docker pull namanvashistha/limedb:latest
 
-# Start with external database
-docker run -d -p 7001:7001 \
-  -e NODE_ID=1 \
+# Start single node
+docker run -d -p 8484:8484 \
+  -e NODE_URL="http://localhost:8484" \
+  -e NODE_PEERS="http://localhost:8484" \
   -e DB_HOST=your-postgres-host \
   -e DB_USERNAME=limedb \
   -e DB_PASSWORD=your-password \
-  limedb:latest
+  namanvashistha/limedb:latest
 ```
 
 ### Production Cluster
 ```bash
-# Full cluster with PostgreSQL
-docker-compose -f docker-compose.prod.yml up -d
+# Multi-node cluster with docker-compose
+docker-compose up -d
 
 # With custom configuration
+NODE_URLS="http://node1:8484,http://node2:8484,http://node3:8484" \
 DB_PASSWORD=secure_password \
-JVM_MEMORY_OPTS="-Xms1g -Xmx2g" \
-docker-compose -f docker-compose.prod.yml up -d
+docker-compose up -d
 ```
 
 ### Environment Variables
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NODE_ID` | `1` | Unique node identifier |
+| `NODE_URL` | Required | This node's URL (e.g., http://localhost:8484) |
+| `NODE_PEERS` | Required | Comma-separated peer URLs |
+| `SERVER_PORT` | `8484` | HTTP server port |
 | `DB_HOST` | `localhost` | PostgreSQL host |
 | `DB_PORT` | `5432` | PostgreSQL port |
 | `DB_USERNAME` | `limedb` | Database username |
 | `DB_PASSWORD` | `limedb` | Database password |
-| `JVM_MEMORY_OPTS` | `-Xms256m -Xmx512m` | JVM heap settings |
-| `JAVA_OPTS` | (optimized) | JVM performance flags |
 
 ### Health Checks
 ```bash
@@ -265,39 +278,34 @@ curl http://localhost:7001/cluster/state | jq
 
 ## Configuration
 
-### Application Properties
+### Command Line Arguments
 
-```properties
-# PostgreSQL connection
-spring.datasource.username=limedb
-spring.datasource.password=limedb
-spring.datasource.host=localhost
-spring.datasource.port=5432
+```bash
+# Required parameters
+./limedb -server.port 8484 -node.url "http://localhost:8484" -node.peers "http://localhost:8484,http://peer:8484"
 
-# JPA Configuration  
-spring.jpa.hibernate.ddl-auto=update
-spring.jpa.database-platform=org.hibernate.dialect.PostgreSQLDialect
-
-# Peer-to-Peer Configuration
-node.id=1
-node.peers=http://localhost:7001,http://localhost:7002,http://localhost:7003
-
-# Consistent Hashing Configuration
-node.routing.virtual-nodes=150
-node.routing.hash-algorithm=MD5
-
-# Logging Configuration
-logging.file.name=logs/limedb-node-${server.port}.log
-logging.level.org.limedb.node.service.NodeService=DEBUG
+# Environment variables (alternative)
+export SERVER_PORT=8484
+export NODE_URL="http://localhost:8484"
+export NODE_PEERS="http://localhost:8484,http://peer:8484"
+export DB_HOST=localhost
+export DB_PORT=5432
+export DB_USERNAME=limedb
+export DB_PASSWORD=limedb
+./limedb
 ```
 
 ### Runtime Parameters
 
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `--server.port` | HTTP port for this node | `--server.port=7001` |
-| `--node.id` | Node identifier (1-based) | `--node.id=1` |
-| `--node.peers` | Comma-separated peer URLs | `--node.peers=http://localhost:7001,http://localhost:7002` |
+| Parameter | Description | Example | Required |
+|-----------|-------------|---------|----------|
+| `-server.port` | HTTP port for this node | `-server.port 8484` | ✅ |
+| `-node.url` | This node's full URL | `-node.url "http://localhost:8484"` | ✅ |
+| `-node.peers` | Comma-separated peer URLs | `-node.peers "http://host1:8484,http://host2:8484"` | ✅ |
+| `-db.host` | PostgreSQL host | `-db.host localhost` | Optional |
+| `-db.port` | PostgreSQL port | `-db.port 5432` | Optional |
+| `-db.username` | Database username | `-db.username limedb` | Optional |
+| `-db.password` | Database password | `-db.password secret` | Optional |
 
 ### Database Setup
 
@@ -338,15 +346,43 @@ GRANT ALL PRIVILEGES ON DATABASE limedb_node_3 TO limedb;
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| **Language** | Java 21 | Modern JVM with performance improvements |
-| **Framework** | Spring Boot 3.5.6 | Web framework & dependency injection |
-| **Database** | PostgreSQL 14+ | Persistent storage per node |
-| **ORM** | JPA/Hibernate | Database mapping & operations |
-| **Build** | Gradle | Build automation & dependency management |
+| **Language** | Go 1.21+ | High-performance, statically typed language |
+| **HTTP Server** | FastHTTP | Ultra-fast HTTP server and client |
+| **Database** | PostgreSQL 14+ | Persistent storage with pgx driver |
+| **Database Driver** | pgx/v5 | High-performance PostgreSQL driver |
+| **Build** | Go toolchain | Native Go build system |
 | **Architecture** | Peer-to-Peer | Distributed system pattern |
-| **Routing** | Consistent Hashing | Virtual nodes with MD5 hash ring |
+| **Routing** | Consistent Hashing | MD5-based hash ring with virtual nodes |
 | **Communication** | HTTP REST | Inter-node communication |
+| **Monitoring** | Textual TUI | Terminal-based cluster monitoring |
 
+
+---
+
+## 📊 TUI Client
+
+LimeDB includes a Terminal User Interface for interactive cluster operations:
+
+```bash
+# Navigate to TUI directory
+cd tui/
+
+# Install dependencies (Python 3.8+)
+pip install -r requirements.txt
+
+# Run the TUI client with cluster URLs
+python main.py --urls http://node1:8080,http://node2:8080,http://node3:8080
+
+# Alternative: Run without arguments to be prompted
+python main.py
+```
+
+The TUI provides:
+- Real-time cluster health monitoring
+- Interactive key-value operations
+- Node status visualization
+- Performance metrics dashboard
+- Automatic load balancing across cluster nodes
 
 ---
 
@@ -418,18 +454,19 @@ LimeDB draws inspiration from:
 - **Redis** - Simple key-value API and operational ease
 - **Cassandra** - Distributed architecture patterns
 - **PostgreSQL** - Reliable ACID storage engine
-- **Spring Boot** - Developer-friendly Java framework
+- **Go ecosystem** - High-performance, statically typed simplicity
 
 ---
 
 ##  Why LimeDB?
 
-- **Fast to Deploy** - Single JAR, familiar Spring Boot setup
+- **Fast to Deploy** - Single binary, no dependencies
+- **High Performance** - Go's efficiency with FastHTTP server
 - **Horizontally Scalable** - Add nodes as you grow
 - **Durable** - PostgreSQL persistence with ACID guarantees
 - **Predictable** - Hash-based routing, same key → same node
 - **Developer Friendly** - REST API, familiar tools
-- **Extensible** - Clean architecture for future enhancements
+- **Extensible** - Clean Go architecture for future enhancements
 
 **Ready to scale your key-value storage?** ⭐ Star the repo and get started!
 
