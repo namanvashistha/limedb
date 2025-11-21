@@ -1,102 +1,81 @@
 #!/usr/bin/env bash
-
-# ==============================================================================
-# LimeDB Proxmox LXC Setup Script
-# ==============================================================================
-# Usage:
-# Run the following command on your Proxmox VE host shell:
-# bash -c "$(wget -qLO - https://raw.githubusercontent.com/namanvashistha/limedb/main/proxmox/limedb_lxc.sh)"
-# ==============================================================================
-
-# Colors
-YW=$(echo "\033[33m")
-BL=$(echo "\033[36m")
-RD=$(echo "\033[01;31m")
-BGN=$(echo "\033[4;92m")
-GN=$(echo "\033[1;92m")
-DGN=$(echo "\033[32m")
-CL=$(echo "\033[m")
-CM="${GN}✓${CL}"
-CROSS="${RD}✗${CL}"
-
-function msg_info() {
-    local msg="$1"
-    echo -ne " ${YW}${msg}..."
-}
-
-function msg_ok() {
-    local msg="$1"
-    echo -e "${CM} ${GN}${msg}${CL}"
-}
-
-function msg_error() {
-    local msg="$1"
-    echo -e "${CROSS} ${RD}${msg}${CL}"
-}
+source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func)
+# Copyright (c) 2025 namanvashistha
+# Author: namanvashistha
+# License: MIT
+# Source: https://github.com/namanvashistha/limedb
 
 APP="LimeDB"
-CT_PASSWORD="password"
-DISK_SIZE="2G"
-RAM_SIZE="512"
-CORES="1"
-OS_TEMPLATE="local:vztmpl/debian-12-standard_12.2-1_amd64.tar.zst" # Adjust based on available templates
-STORAGE="local-lvm"
+var_tags="${var_tags:-database;keyvalue}"
+var_cpu="${var_cpu:-1}"
+var_ram="${var_ram:-512}"
+var_disk="${var_disk:-2}"
+var_os="${var_os:-debian}"
+var_version="${var_version:-12}"
+var_unprivileged="${var_unprivileged:-1}"
 
-echo -e "${GN}Welcome to the ${APP} LXC Setup Script${CL}"
+header_info "$APP"
+variables
+color
+catch_errors
 
-# Check if running as root
-if [ "$EUID" -ne 0 ]; then 
-  msg_error "Please run as root"
-  exit 1
-fi
+function update_script() {
+  header_info
+  check_container_storage
+  check_container_resources
 
-# Find available CT ID
-msg_info "Finding available Container ID"
-CT_ID=100
-while pct status $CT_ID >/dev/null 2>&1; do
-    CT_ID=$((CT_ID + 1))
-    if [ $CT_ID -gt 999 ]; then
-        msg_error "No available CT ID found (checked 100-999)"
-        exit 1
-    fi
-done
-msg_ok "Using Container ID: ${CT_ID}"
-
-# 1. Create Container
-msg_info "Creating LXC Container (ID: ${CT_ID})"
-pct create $CT_ID $OS_TEMPLATE \
-    --hostname limedb \
-    --cores $CORES \
-    --memory $RAM_SIZE \
-    --swap 512 \
-    --storage $STORAGE \
-    --password $CT_PASSWORD \
-    --net0 name=eth0,bridge=vmbr0,ip=dhcp \
-    --features nesting=1 \
-    --unprivileged 1 \
-    --rootfs $STORAGE:${DISK_SIZE} >/dev/null 2>&1
-
-if [ $? -eq 0 ]; then
-    msg_ok "Container Created"
-else
-    msg_error "Failed to create container. Check ID availability or template."
+  if ! command -v limedb >/dev/null 2>&1; then
+    msg_error "No ${APP} Installation Found!"
     exit 1
+  fi
+
+  msg_info "Updating LimeDB LXC"
+  
+  # Get latest version
+  LATEST_VERSION=$(curl -s https://api.github.com/repos/namanvashistha/limedb/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+  
+  if [ -z "$LATEST_VERSION" ]; then
+    msg_error "Failed to get latest version"
+    exit 1
+  fi
+
+  # Stop service
+  $STD systemctl stop limedb
+  
+  # Download and install latest version
+  $STD wget -qO /usr/local/bin/limedb "https://github.com/namanvashistha/limedb/releases/download/${LATEST_VERSION}/limedb-linux-amd64"
+  $STD chmod +x /usr/local/bin/limedb
+  
+  # Start service
+  $STD systemctl start limedb
+  
+  msg_ok "Updated LimeDB to ${LATEST_VERSION}"
+  exit
+}
+
+start
+build_container
+description
+
+msg_info "Installing Dependencies"
+$STD apt-get update
+$STD apt-get install -y curl ca-certificates wget
+msg_ok "Installed Dependencies"
+
+msg_info "Installing LimeDB"
+# Get latest version
+LATEST_VERSION=$(curl -s https://api.github.com/repos/namanvashistha/limedb/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+
+if [ -z "$LATEST_VERSION" ]; then
+  LATEST_VERSION="v0.0.2"  # Fallback version
 fi
 
-# 2. Start Container
-msg_info "Starting Container"
-pct start $CT_ID
-sleep 5 # Wait for startup
-msg_ok "Container Started"
+$STD wget -qO /usr/local/bin/limedb "https://github.com/namanvashistha/limedb/releases/download/${LATEST_VERSION}/limedb-linux-amd64"
+$STD chmod +x /usr/local/bin/limedb
+msg_ok "Installed LimeDB ${LATEST_VERSION}"
 
-# 3. Install Dependencies & LimeDB
-msg_info "Installing LimeDB"
-pct exec $CT_ID -- bash -c "apt-get update && apt-get install -y curl ca-certificates wget" >/dev/null 2>&1
-pct exec $CT_ID -- bash -c "wget -qO /usr/local/bin/limedb https://github.com/namanvashistha/limedb/releases/download/v0.0.2/limedb-linux-amd64"
-pct exec $CT_ID -- bash -c "chmod +x /usr/local/bin/limedb"
-
-# 4. Setup Service
-pct exec $CT_ID -- bash -c "cat <<EOF > /etc/systemd/system/limedb.service
+msg_info "Creating Service"
+cat <<EOF >/etc/systemd/system/limedb.service
 [Unit]
 Description=LimeDB Key-Value Store
 After=network.target
@@ -106,16 +85,22 @@ Type=simple
 User=root
 ExecStart=/usr/local/bin/limedb
 Restart=on-failure
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
-EOF"
+EOF
 
-pct exec $CT_ID -- systemctl enable --now limedb >/dev/null 2>&1
-msg_ok "LimeDB Installed & Started"
+$STD systemctl daemon-reload
+$STD systemctl enable --now limedb.service
+msg_ok "Created Service"
 
-# 5. Get IP
-IP=$(pct exec $CT_ID -- ip -4 addr show eth0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+motd_ssh
+customize
 
-echo -e "${INFO}${YW} Access LimeDB at:${CL}"
+clean
+
+msg_ok "Completed Successfully!\n"
+echo -e "${CREATING}${GN}${APP} setup has been successfully initialized!${CL}"
+echo -e "${INFO}${YW} Access it using the following URL:${CL}"
 echo -e "${TAB}${GATEWAY}${BGN}http://${IP}:7001${CL}"
