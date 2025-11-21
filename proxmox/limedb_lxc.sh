@@ -123,28 +123,51 @@ if [[ $CTID -gt 999 ]]; then
 fi
 msg_ok "Using Container ID: ${CTID}"
 
-# Detect storage (optimized)
+# Detect storage (robust)
 msg_info "Detecting available storage"
-# Get all storage info in one call
-STORAGE_INFO=$(pvesm status 2>/dev/null | awk 'NR>1 && /active/')
 
-# Find template and container storage efficiently
-TEMPLATE_STORAGE=$(echo "$STORAGE_INFO" | grep -E "vztmpl|images" | head -1 | awk '{print $1}')
-CONTAINER_STORAGE=$(echo "$STORAGE_INFO" | grep -E "rootdir|images" | head -1 | awk '{print $1}')
+# Get all storage info and find template storage
+TEMPLATE_STORAGE=""
+CONTAINER_STORAGE=""
 
-# Use local-lvm as fallback if available
+# Find template storage (supports vztmpl content)
+for storage in $(pvesm status -content vztmpl 2>/dev/null | awk 'NR>1 && /active/ {print $1}'); do
+    if [[ -n "$storage" ]]; then
+        TEMPLATE_STORAGE="$storage"
+        break
+    fi
+done
+
+# Find container storage (supports rootdir content)
+for storage in $(pvesm status -content rootdir 2>/dev/null | awk 'NR>1 && /active/ {print $1}'); do
+    if [[ -n "$storage" ]]; then
+        CONTAINER_STORAGE="$storage"
+        break
+    fi
+done
+
+# Fallback: use any available storage if specific content types not found
+if [[ -z "$TEMPLATE_STORAGE" ]]; then
+    TEMPLATE_STORAGE=$(pvesm status 2>/dev/null | awk 'NR>1 && /active/ && /local/ {print $1}' | head -1)
+fi
+
 if [[ -z "$CONTAINER_STORAGE" ]]; then
-    CONTAINER_STORAGE=$(echo "$STORAGE_INFO" | grep "local-lvm" | head -1 | awk '{print $1}')
+    CONTAINER_STORAGE=$(pvesm status 2>/dev/null | awk 'NR>1 && /active/ && /local-lvm/ {print $1}' | head -1)
+    if [[ -z "$CONTAINER_STORAGE" ]]; then
+        CONTAINER_STORAGE=$(pvesm status 2>/dev/null | awk 'NR>1 && /active/ {print $1}' | head -1)
+    fi
 fi
 
 if [[ -z "$TEMPLATE_STORAGE" || -z "$CONTAINER_STORAGE" ]]; then
     msg_error "No suitable storage found"
+    echo "Available storage:"
+    pvesm status 2>/dev/null | awk 'NR>1 {print "  " $1 " (" $2 ")"}'
     exit 1
 fi
 
-# Get storage info more efficiently
-TEMPLATE_FREE=$(echo "$STORAGE_INFO" | grep "^$TEMPLATE_STORAGE " | awk '{printf "%.1fGB", $4/1024/1024}')
-CONTAINER_FREE=$(echo "$STORAGE_INFO" | grep "^$CONTAINER_STORAGE " | awk '{printf "%.1fGB", $4/1024/1024}')
+# Get storage info
+TEMPLATE_FREE=$(pvesm status -storage "$TEMPLATE_STORAGE" 2>/dev/null | awk 'NR>1 {printf "%.1fGB", $4/1024/1024}')
+CONTAINER_FREE=$(pvesm status -storage "$CONTAINER_STORAGE" 2>/dev/null | awk 'NR>1 {printf "%.1fGB", $4/1024/1024}')
 
 echo -e "${CM} ${GN}Template Storage${CL}   ${TEMPLATE_STORAGE} ${DGN}(${TEMPLATE_FREE} available)${CL}"
 echo -e "${CM} ${GN}Container Storage${CL}  ${CONTAINER_STORAGE} ${DGN}(${CONTAINER_FREE} available)${CL}"
