@@ -13,17 +13,19 @@ set -euo pipefail
 shopt -s inherit_errexit nullglob
 
 # Colors and formatting
-YW=$(echo "\033[33m")
-BL=$(echo "\033[36m")
-RD=$(echo "\033[01;31m")
-BGN=$(echo "\033[4;92m")
-GN=$(echo "\033[1;92m")
-DGN=$(echo "\033[32m")
-CL=$(echo "\033[m")
+YW='\033[33m'     # Yellow
+BL='\033[36m'     # Blue  
+RD='\033[01;31m'  # Red
+BGN='\033[4;92m'  # Background Green
+GN='\033[1;92m'   # Green
+DGN='\033[32m'    # Dark Green
+CL='\033[m'       # Clear
 CM="${GN}✓${CL}"
 CROSS="${RD}✗${CL}"
 INFO="${BL}ℹ${CL}"
 CREATING="${BL}🚀${CL}"
+SUCCESS="${GN}🎉${CL}"
+WARNING="${YW}⚠${CL}"
 TAB="   "
 GATEWAY="${BGN}"
 
@@ -56,14 +58,22 @@ function msg_error() {
 function header_info() {
     clear
     cat <<"EOF"
- __    _                ____  ____
-/ /   (_)___ ___  ___  / __ \/ __ )
-/ /   / / __ `__ \/ _ \/ / / / __  |
-/ /___/ / / / / / /  __/ /_/ / /_/ /
-/_____/_/_/ /_/ /_/\___/_____/_____/
+  ╭─────────────────────────────────────────────────────╮
+  │                                                     │
+  │    __    _                ____  ____                │
+  │   / /   (_)___ ___  ___  / __ \/ __ )               │
+  │  / /   / / __ `__ \/ _ \/ / / / __  |               │
+  │ / /___/ / / / / / /  __/ /_/ / /_/ /                │
+  │/_____/_/_/ /_/ /_/\___/_____/_____/                 │
+  │                                                     │
+  │        Fast Key-Value Store for Modern Apps        │
+  │                                                     │
+  ╰─────────────────────────────────────────────────────╯
 
 EOF
-echo -e "${CREATING}${GN}${APP} LXC Container Creation${CL}"
+echo -e "${CREATING} ${GN}${APP} LXC Container Setup${CL}"
+echo -e "${DGN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${CL}"
+echo ""
 }
 
 # Validate environment
@@ -80,62 +90,64 @@ fi
 header_info
 
 # Display configuration
-echo -e "${INFO}${YW} Using Default Settings on node $(hostname)${CL}"
-echo -e "${TAB}${YW}🆔  Container ID:${CL} Will be auto-detected"
-echo -e "${TAB}${YW}🖥️  Operating System:${CL} ${var_os} (${var_version})"
-echo -e "${TAB}${YW}📦  Container Type:${CL} $([ "$var_unprivileged" == "1" ] && echo "Unprivileged" || echo "Privileged")"
-echo -e "${TAB}${YW}💾  Disk Size:${CL} ${var_disk} GB"
-echo -e "${TAB}${YW}🧠  CPU Cores:${CL} ${var_cpu}"
-echo -e "${TAB}${YW}🛠️  RAM Size:${CL} ${var_ram} MiB"
-echo -e "${TAB}${CREATING}${GN}Creating a ${APP} LXC using the above settings${CL}"
+echo -e "🔧 ${YW}Configuration${CL}"
+echo -e "┌─────────────────────────────────────────────────────┐"
+echo -e "│ ${YW}Node:${CL}           $(hostname)"
+echo -e "│ ${YW}Container ID:${CL}   Will be auto-detected"
+echo -e "│ ${YW}OS:${CL}             ${var_os} ${var_version}"
+echo -e "│ ${YW}Type:${CL}           $([ "$var_unprivileged" == "1" ] && echo "Unprivileged" || echo "Privileged")"
+echo -e "│ ${YW}Storage:${CL}        ${var_disk} GB"
+echo -e "│ ${YW}CPU Cores:${CL}      ${var_cpu}"
+echo -e "│ ${YW}Memory:${CL}         ${var_ram} MiB"
+echo -e "└─────────────────────────────────────────────────────┘"
+echo ""
+echo -e "${CREATING} ${GN}Initializing ${APP} container deployment...${CL}"
 echo ""
 
-# Find available container ID
+# Find available container ID (optimized)
 msg_info "Finding available Container ID"
+# Get all existing container IDs at once
+EXISTING_IDS=$(pct list 2>/dev/null | awk 'NR>1 {print $1}' | sort -n)
 CTID=100
-while pct status $CTID &>/dev/null; do
-    CTID=$((CTID + 1))
-    if [[ $CTID -gt 999 ]]; then
-        msg_error "No available Container ID found (checked 100-999)"
-        exit 1
+for existing_id in $EXISTING_IDS; do
+    if [[ $CTID -eq $existing_id ]]; then
+        CTID=$((CTID + 1))
+    elif [[ $CTID -lt $existing_id ]]; then
+        break
     fi
 done
+
+if [[ $CTID -gt 999 ]]; then
+    msg_error "No available Container ID found (checked 100-999)"
+    exit 1
+fi
 msg_ok "Using Container ID: ${CTID}"
 
-# Detect storage
+# Detect storage (optimized)
 msg_info "Detecting available storage"
-TEMPLATE_STORAGE=""
-CONTAINER_STORAGE=""
+# Get all storage info in one call
+STORAGE_INFO=$(pvesm status 2>/dev/null | awk 'NR>1 && /active/')
 
-# Find template storage
-for storage in $(pvesm status -content vztmpl 2>/dev/null | awk 'NR>1 && /active/ {print $1}' | head -1); do
-    if [[ -n "$storage" ]]; then
-        TEMPLATE_STORAGE="$storage"
-        break
-    fi
-done
+# Find template and container storage efficiently
+TEMPLATE_STORAGE=$(echo "$STORAGE_INFO" | grep -E "vztmpl|images" | head -1 | awk '{print $1}')
+CONTAINER_STORAGE=$(echo "$STORAGE_INFO" | grep -E "rootdir|images" | head -1 | awk '{print $1}')
 
-# Find container storage
-for storage in $(pvesm status -content rootdir 2>/dev/null | awk 'NR>1 && /active/ {print $1}' | head -1); do
-    if [[ -n "$storage" ]]; then
-        CONTAINER_STORAGE="$storage"
-        break
-    fi
-done
+# Use local-lvm as fallback if available
+if [[ -z "$CONTAINER_STORAGE" ]]; then
+    CONTAINER_STORAGE=$(echo "$STORAGE_INFO" | grep "local-lvm" | head -1 | awk '{print $1}')
+fi
 
 if [[ -z "$TEMPLATE_STORAGE" || -z "$CONTAINER_STORAGE" ]]; then
     msg_error "No suitable storage found"
     exit 1
 fi
 
-# Get storage info
-TEMPLATE_FREE=$(pvesm status -storage "$TEMPLATE_STORAGE" 2>/dev/null | awk 'NR>1 {printf "%.1fGB", $4/1024/1024}')
-TEMPLATE_USED=$(pvesm status -storage "$CONTAINER_STORAGE" 2>/dev/null | awk 'NR>1 {printf "%.1fGB", ($3-$4)/1024/1024}')
-CONTAINER_FREE=$(pvesm status -storage "$CONTAINER_STORAGE" 2>/dev/null | awk 'NR>1 {printf "%.1fGB", $4/1024/1024}')
-CONTAINER_USED=$(pvesm status -storage "$CONTAINER_STORAGE" 2>/dev/null | awk 'NR>1 {printf "%.1fGB", ($3-$4)/1024/1024}')
+# Get storage info more efficiently
+TEMPLATE_FREE=$(echo "$STORAGE_INFO" | grep "^$TEMPLATE_STORAGE " | awk '{printf "%.1fGB", $4/1024/1024}')
+CONTAINER_FREE=$(echo "$STORAGE_INFO" | grep "^$CONTAINER_STORAGE " | awk '{printf "%.1fGB", $4/1024/1024}')
 
-echo -e "${CM} ${GN}Storage ${TEMPLATE_STORAGE} (Free: ${TEMPLATE_FREE}  Used: ${TEMPLATE_USED}) [Template]${CL}"
-echo -e "${CM} ${GN}Storage ${CONTAINER_STORAGE} (Free: ${CONTAINER_FREE}  Used: ${CONTAINER_USED}) [Container]${CL}"
+echo -e "${CM} ${GN}Template Storage${CL}   ${TEMPLATE_STORAGE} ${DGN}(${TEMPLATE_FREE} available)${CL}"
+echo -e "${CM} ${GN}Container Storage${CL}  ${CONTAINER_STORAGE} ${DGN}(${CONTAINER_FREE} available)${CL}"
 
 # Find OS template
 msg_info "Finding OS template"
@@ -163,7 +175,7 @@ if [[ -z "$OS_TEMPLATE" ]]; then
 fi
 
 TEMPLATE_NAME=$(basename "$OS_TEMPLATE" .tar.zst)
-echo -e "${CM} ${GN}Template ${TEMPLATE_NAME} [${TEMPLATE_STORAGE}]${CL}"
+echo -e "${CM} ${GN}OS Template${CL}        ${TEMPLATE_NAME}"
 
 # Create container
 msg_info "Creating LXC Container"
@@ -172,8 +184,8 @@ msg_info "Creating LXC Container"
 # The OS_TEMPLATE already contains the full filename, just need storage:vztmpl/filename
 TEMPLATE_PATH="${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE_NAME}.tar.zst"
 
-# Debug: Show the command being executed
-echo -ne "\r ${YW}Executing: pct create $CTID \"$TEMPLATE_PATH\" --hostname limedb --cores $var_cpu --memory $var_ram...${CL}"
+# Show container specifications being created
+echo -ne "\r ${DGN}Creating container ${CTID} with ${var_cpu} core(s), ${var_ram}MB RAM, ${var_disk}GB storage...${CL}"
 
 # Create container in background with progress indication
 (
@@ -223,12 +235,13 @@ CREATE_RESULT=$(cat /tmp/pct_result 2>/dev/null || echo 1)
 
 echo -ne "\r"
 if [[ $CREATE_RESULT -eq 0 ]]; then
-    echo -e "${CM} ${GN}LXC Container ${CTID} was successfully created.${CL}"
+    echo -e "${CM} ${GN}Container created successfully${CL} ${DGN}(ID: ${CTID})${CL}"
 else
-    msg_error "Failed to create container"
+    msg_error "Container creation failed"
+    echo -e "${WARNING} ${YW}Troubleshooting information:${CL}"
     echo "Command output:"
     cat /tmp/pct_output.log 2>/dev/null || echo "No output available"
-    echo "Error details:"
+    echo -e "\n${RD}Error details:${CL}"
     cat /tmp/pct_error.log 2>/dev/null || echo "No error details available"
     exit 1
 fi
@@ -237,27 +250,31 @@ fi
 rm -f /tmp/pct_output.log /tmp/pct_error.log /tmp/pct_result
 
 # Start container
-msg_info "Starting LXC Container"
+msg_info "Starting container"
 if pct start $CTID 2>/dev/null; then
-    echo -e "${CM} ${GN}Started LXC Container${CL}"
+    echo -e "${CM} ${GN}Container started${CL}"
 else
     msg_error "Failed to start container"
+    echo -e "${WARNING} ${YW}Try manually: pct start ${CTID}${CL}"
     exit 1
 fi
 
-# Wait for container to be ready and network available
-for i in {1..10}; do
-    echo -ne " ${INFO} No network in LXC yet (try $i/10) – waiting..."
-    sleep 3
-    if pct exec $CTID -- ping -c1 8.8.8.8 &>/dev/null; then
-        echo -ne "\r"
-        echo -e "${CM} ${GN}Network in LXC is reachable (ping)${CL}"
-        break
+# Wait for container to be ready and network available (optimized)
+msg_info "Waiting for network connectivity"
+for i in {1..15}; do
+    if pct exec $CTID -- test -f /bin/bash 2>/dev/null; then
+        # Container is responsive, test network with lighter check
+        if pct exec $CTID -- timeout 2 ping -c1 8.8.8.8 &>/dev/null; then
+            echo -e "${CM} ${GN}Network ready${CL}"
+            break
+        fi
     fi
-    echo -ne "\r"
-    if [[ $i -eq 10 ]]; then
-        msg_error "Network not reachable after 30 seconds"
-        echo "Container may still be starting up. You can check later with: pct enter $CTID"
+    echo -ne "\r ${YW}Waiting for network connectivity... (${i}/15)${CL}"
+    sleep 2
+    if [[ $i -eq 15 ]]; then
+        echo -ne "\r"
+        msg_error "Network not ready after 30 seconds"
+        echo -e "${WARNING} ${YW}Container may still be starting. Try: pct enter ${CTID}${CL}"
         exit 1
     fi
 done
@@ -266,15 +283,18 @@ done
 IP=$(pct exec $CTID -- ip route get 1 2>/dev/null | awk '{print $7}' | head -1)
 
 # Install LimeDB in container
-echo "Extracting templates from packages: 100%"
-echo -e "${CM} ${GN}Customized LXC Container${CL}"
+echo ""
+echo -e "📦 ${YW}Installing LimeDB...${CL}"
+echo -e "${DGN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${CL}"
 
-# Install dependencies and LimeDB
+# Install dependencies and LimeDB (optimized single operation)
+echo -ne " ${YW}Installing LimeDB (all steps)...${CL}"
 pct exec $CTID -- bash -c "
+    # Update and install dependencies
     apt-get update &>/dev/null
     apt-get install -y curl ca-certificates wget &>/dev/null
     
-    # Get latest version
+    # Get latest version and download in parallel
     LATEST_VERSION=\$(curl -s https://api.github.com/repos/namanvashistha/limedb/releases/latest | grep '\"tag_name\":' | sed -E 's/.*\"([^\"]+)\".*/\1/')
     
     if [ -z \"\$LATEST_VERSION\" ]; then
@@ -282,10 +302,9 @@ pct exec $CTID -- bash -c "
     fi
     
     # Download and install LimeDB
-    wget -qO /usr/local/bin/limedb \"https://github.com/namanvashistha/limedb/releases/download/\${LATEST_VERSION}/limedb-linux-amd64\"
-    chmod +x /usr/local/bin/limedb
+    wget -qO /usr/local/bin/limedb \"https://github.com/namanvashistha/limedb/releases/download/\${LATEST_VERSION}/limedb-linux-amd64\" &
     
-    # Create systemd service
+    # Create systemd service while download happens
     cat > /etc/systemd/system/limedb.service << 'EOF'
 [Unit]
 Description=LimeDB Key-Value Store
@@ -302,38 +321,96 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
     
+    # Create MOTD while download happens
+    cat > /etc/motd << 'MOTDEOF'
+  ╭─────────────────────────────────────────────────────╮
+  │                                                     │
+  │    __    _                ____  ____                │
+  │   / /   (_)___ ___  ___  / __ \/ __ )               │
+  │  / /   / / __ \`__ \/ _ \/ / / / __  |               │
+  │ / /___/ / / / / / /  __/ /_/ / /_/ /                │
+  │/_____/_/_/ /_/ /_/\___/_____/_____/                 │
+  │                                                     │
+  │        Fast Key-Value Store for Modern Apps        │
+  │                                                     │
+  ╰─────────────────────────────────────────────────────╯
+
+  🌐 Access: http://\$(ip route get 1 | awk '{print \$7}' | head -1):8484
+  📚 Documentation: https://github.com/namanvashistha/limedb
+  🔧 Management: systemctl [start|stop|restart] limedb
+
+MOTDEOF
+    
+    # Enable auto-login for root user on console
+    mkdir -p /etc/systemd/system/getty@tty1.service.d
+    cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf << 'AUTOEOF'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin root --noclear %I \$TERM
+AUTOEOF
+    
+    # Enable auto-login for container console
+    mkdir -p /etc/systemd/system/container-getty@1.service.d
+    cat > /etc/systemd/system/container-getty@1.service.d/autologin.conf << 'AUTOEOF2'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin root --noclear --keep-baud console 115200,38400,9600 \$TERM
+AUTOEOF2
+    
+    # Reload systemd to apply auto-login
+    systemctl daemon-reload
+    
+    # Wait for download to complete
+    wait
+    chmod +x /usr/local/bin/limedb
+    
     # Enable and start service
     systemctl daemon-reload
     systemctl enable --now limedb.service &>/dev/null
     
-    # Create MOTD
-    cat > /etc/motd << 'MOTDEOF'
-   __    _                ____  ____
-  / /   (_)___ ___  ___  / __ \/ __ )
- / /   / / __ \`__ \/ _ \/ / / / __  |
-/ /___/ / / / / / /  __/ /_/ / /_/ /
-/_____/_/_/ /_/ /_/\___/_____/_____/
-
-LimeDB - Fast Key-Value Store
-Access: http://\$(ip route get 1 | awk '{print \$7}' | head -1):7001
-Docs: https://github.com/namanvashistha/limedb
-
-MOTDEOF
+    echo \"\$LATEST_VERSION\"
 "
+INSTALLED_VERSION=\$?
+echo -e "\r${CM} ${GN}LimeDB installation completed${CL}"
 
 # Final output
 echo ""
-echo -e "${CM} ${GN}Completed Successfully!${CL}"
+echo -e "${DGN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${CL}"
+echo -e "${SUCCESS} ${GN}LimeDB installation completed successfully!${CL}"
+echo -e "${DGN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${CL}"
 echo ""
-echo -e "${CREATING}${GN}${APP} setup has been successfully initialized!${CL}"
-echo -e "${INFO}${YW} Access it using the following URL:${CL}"
-echo -e "${TAB}${GATEWAY}${BGN}http://${IP}:7001${CL}"
+
+# Container Information Box
+echo -e "📋 ${YW}Container Information${CL}"
+echo -e "┌─────────────────────────────────────────────────────┐"
+echo -e "│ ${YW}Container ID:${CL}   ${CTID}"
+echo -e "│ ${YW}IP Address:${CL}     ${IP:-Pending DHCP}"
+echo -e "│ ${YW}Username:${CL}       root"
+echo -e "│ ${YW}Password:${CL}       ${PASSWORD}"
+echo -e "│ ${YW}Service Port:${CL}   8484"
+echo -e "└─────────────────────────────────────────────────────┘"
 echo ""
-echo -e "${YW}Container ID:${CL} ${CTID}"
-echo -e "${YW}Username:${CL} root"
-echo -e "${YW}Password:${CL} ${PASSWORD}"
+
+# Access Information
+echo -e "🌐 ${YW}Access Information${CL}"
+echo -e "┌─────────────────────────────────────────────────────┐"
+echo -e "│ ${YW}Web Interface:${CL}  ${GATEWAY}http://${IP}:8484${CL}"
+echo -e "│ ${YW}API Endpoint:${CL}   ${GATEWAY}http://${IP}:8484${CL}"
+echo -e "│ ${YW}Health Check:${CL}   ${GATEWAY}curl http://${IP}:8484${CL}"
+echo -e "└─────────────────────────────────────────────────────┘"
 echo ""
-echo -e "${DGN}Management commands:${CL}"
-echo -e "${TAB}${YW}pct enter ${CTID}${CL} - Enter container"
-echo -e "${TAB}${YW}pct stop ${CTID}${CL} - Stop container"
-echo -e "${TAB}${YW}pct start ${CTID}${CL} - Start container"
+
+# Management Commands
+echo -e "🔧 ${YW}Management Commands${CL}"
+echo -e "┌─────────────────────────────────────────────────────┐"
+echo -e "│ ${DGN}Enter container:${CL}       pct enter ${CTID}"
+echo -e "│ ${DGN}Stop container:${CL}        pct stop ${CTID}"
+echo -e "│ ${DGN}Start container:${CL}       pct start ${CTID}"
+echo -e "│ ${DGN}Restart LimeDB:${CL}        pct exec ${CTID} systemctl restart limedb"
+echo -e "│ ${DGN}View logs:${CL}             pct exec ${CTID} journalctl -u limedb -f"
+echo -e "│ ${DGN}Check status:${CL}          pct exec ${CTID} systemctl status limedb"
+echo -e "└─────────────────────────────────────────────────────┘"
+echo ""
+
+echo -e "${SUCCESS} ${GN}Enjoy using LimeDB!${CL} ${DGN}Visit: https://github.com/namanvashistha/limedb${CL}"
+echo ""
