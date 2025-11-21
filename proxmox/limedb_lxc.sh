@@ -364,8 +364,8 @@ pct exec $CTID -- bash -c "
     wget -qO /usr/local/bin/limedb \"https://github.com/namanvashistha/limedb/releases/download/\${LATEST_VERSION}/limedb-linux-amd64\" &
     LIMEDB_PID=\$!
     
-    # Download OTEL Collector
-    wget -qO /tmp/otelcol.tar.gz \"https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.91.0/otelcol_0.91.0_linux_amd64.tar.gz\" &
+    # Download OTEL Collector Contrib (includes all components)
+    wget -qO /tmp/otelcol.tar.gz \"https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.91.0/otelcol-contrib_0.91.0_linux_amd64.tar.gz\" &
     OTEL_PID=\$!
     
     # Get container IP for node URL
@@ -377,7 +377,7 @@ pct exec $CTID -- bash -c "
     # Create OTEL Collector directories and config
     mkdir -p /etc/otelcol /var/log/otelcol
     
-    # Create OTEL Collector configuration (production-ready)
+    # Create OTEL Collector configuration (simplified for standard components)
     cat > /etc/otelcol/config.yaml << 'OTELCONF'
 receivers:
   otlp:
@@ -389,89 +389,49 @@ receivers:
 
 processors:
   batch:
+    timeout: 1s
+    send_batch_size: 512
   resourcedetection:
-    detectors: [\"env\", \"system\"]
+    detectors: [\"env\", \"system\", \"host\"]
     override: false
-  transform/drop_unneeded_resource_attributes:
-    error_mode: ignore
-    trace_statements:
-      - context: resource
-        statements:
-          - delete_key(attributes, \"k8s.pod.start_time\")
-          - delete_key(attributes, \"os.description\")
-          - delete_key(attributes, \"os.type\")
-          - delete_key(attributes, \"process.command_args\")
-          - delete_key(attributes, \"process.executable.path\")
-          - delete_key(attributes, \"process.pid\")
-          - delete_key(attributes, \"process.runtime.description\")
-          - delete_key(attributes, \"process.runtime.name\")
-          - delete_key(attributes, \"process.runtime.version\")
-    metric_statements:
-      - context: resource
-        statements:
-          - delete_key(attributes, \"k8s.pod.start_time\")
-          - delete_key(attributes, \"os.description\")
-          - delete_key(attributes, \"os.type\")
-          - delete_key(attributes, \"process.command_args\")
-          - delete_key(attributes, \"process.executable.path\")
-          - delete_key(attributes, \"process.pid\")
-          - delete_key(attributes, \"process.runtime.description\")
-          - delete_key(attributes, \"process.runtime.name\")
-          - delete_key(attributes, \"process.runtime.version\")
-    log_statements:
-      - context: resource
-        statements:
-          - delete_key(attributes, \"k8s.pod.start_time\")
-          - delete_key(attributes, \"os.description\")
-          - delete_key(attributes, \"os.type\")
-          - delete_key(attributes, \"process.command_args\")
-          - delete_key(attributes, \"process.executable.path\")
-          - delete_key(attributes, \"process.pid\")
-          - delete_key(attributes, \"process.runtime.description\")
-          - delete_key(attributes, \"process.runtime.name\")
-          - delete_key(attributes, \"process.runtime.version\")
-  transform/add_resource_attributes_as_metric_attributes:
-    error_mode: ignore
-    metric_statements:
-      - context: datapoint
-        statements:
-          - set(attributes[\"deployment.environment\"], resource.attributes[\"deployment.environment\"])
-          - set(attributes[\"service.version\"], resource.attributes[\"service.version\"])
+  resource:
+    attributes:
+      - key: service.name
+        value: limedb-node
+        action: upsert
+      - key: service.version
+        value: v0.0.6
+        action: upsert
+      - key: deployment.environment
+        value: production
+        action: upsert
 
 exporters:
   otlphttp/grafana_cloud:
     endpoint: \"\${GRAFANA_OTLP_ENDPOINT}\"
-    auth:
-      authenticator: basicauth/grafana_cloud
-
-extensions:
-  basicauth/grafana_cloud:
-    client_auth:
-      username: \"\${GRAFANA_CLOUD_USERNAME}\"
-      password: \"\${GRAFANA_CLOUD_PASSWORD}\"
-
-connectors:
-  grafanacloud:
-    host_identifiers: [\"host.name\"]
+    headers:
+      authorization: \"Basic \${GRAFANA_CLOUD_AUTH_HEADER}\"
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 300s
 
 service:
-  extensions: [basicauth/grafana_cloud]
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [resourcedetection, transform/drop_unneeded_resource_attributes, batch]
-      exporters: [otlphttp/grafana_cloud, grafanacloud]
+      processors: [resourcedetection, resource, batch]
+      exporters: [otlphttp/grafana_cloud]
     metrics:
       receivers: [otlp]
-      processors: [resourcedetection, transform/drop_unneeded_resource_attributes, transform/add_resource_attributes_as_metric_attributes, batch]
-      exporters: [otlphttp/grafana_cloud]
-    metrics/grafanacloud:
-      receivers: [grafanacloud]
-      processors: [batch]
+      processors: [resourcedetection, resource, batch]
       exporters: [otlphttp/grafana_cloud]
     logs:
       receivers: [otlp]
-      processors: [resourcedetection, transform/drop_unneeded_resource_attributes, batch]
+      processors: [resourcedetection, resource, batch]
       exporters: [otlphttp/grafana_cloud]
 OTELCONF
 
@@ -493,18 +453,23 @@ OTELCONF
 GRAFANA_OTLP_ENDPOINT=your_otlp_endpoint_here
 GRAFANA_CLOUD_USERNAME=your_instance_id_here
 GRAFANA_CLOUD_PASSWORD=your_access_token_here
+GRAFANA_CLOUD_AUTH_HEADER=your_base64_encoded_username_password_here
 HOSTNAME=limedb-node
 ENVTEMPLATE
 
     # Create default environment with dynamic values from script environment
-    if [[ -n \"${GRAFANA_CLOUD_USERNAME}\" && -n \"${GRAFANA_CLOUD_PASSWORD}\" && -n \"${GRAFANA_OTLP_ENDPOINT}\" ]]; then
+    if [[ -n \"$GRAFANA_CLOUD_USERNAME\" && -n \"$GRAFANA_CLOUD_PASSWORD\" && -n \"$GRAFANA_OTLP_ENDPOINT\" ]]; then
+        # Create base64 encoded auth header
+        AUTH_HEADER=\$(echo -n \"$GRAFANA_CLOUD_USERNAME:$GRAFANA_CLOUD_PASSWORD\" | base64 -w 0)
+        
         # Use configured values
         cat > /etc/otelcol/environment << CONFIGUREDENV
 # OTEL Collector Environment Variables
 # Configured automatically from ~/.grafana/config
-GRAFANA_OTLP_ENDPOINT=${GRAFANA_OTLP_ENDPOINT}
-GRAFANA_CLOUD_USERNAME=${GRAFANA_CLOUD_USERNAME}
-GRAFANA_CLOUD_PASSWORD=${GRAFANA_CLOUD_PASSWORD}
+GRAFANA_OTLP_ENDPOINT=$GRAFANA_OTLP_ENDPOINT
+GRAFANA_CLOUD_USERNAME=$GRAFANA_CLOUD_USERNAME
+GRAFANA_CLOUD_PASSWORD=$GRAFANA_CLOUD_PASSWORD
+GRAFANA_CLOUD_AUTH_HEADER=\$AUTH_HEADER
 HOSTNAME=limedb-node
 CONFIGUREDENV
     else
@@ -607,7 +572,7 @@ AUTOEOF2
     
     wait \$OTEL_PID
     cd /tmp && tar -xzf otelcol.tar.gz
-    mv otelcol /usr/local/bin/
+    mv otelcol-contrib /usr/local/bin/otelcol
     chmod +x /usr/local/bin/otelcol
     rm -f otelcol.tar.gz
     
@@ -620,7 +585,7 @@ AUTOEOF2
     systemctl start limedb.service &>/dev/null
     
     # Start OTEL Collector if credentials are configured
-    if [[ -n \"${GRAFANA_CLOUD_USERNAME}\" && -n \"${GRAFANA_CLOUD_PASSWORD}\" && -n \"${GRAFANA_OTLP_ENDPOINT}\" ]]; then
+    if [[ -n \"$GRAFANA_CLOUD_USERNAME\" && -n \"$GRAFANA_CLOUD_PASSWORD\" && -n \"$GRAFANA_OTLP_ENDPOINT\" ]]; then
         systemctl start otel-collector.service &>/dev/null
     fi
     
