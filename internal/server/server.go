@@ -87,6 +87,13 @@ func (s *Server) traceMiddleware(next fasthttp.RequestHandler) fasthttp.RequestH
 		tracedCtx, span := s.tracer.Start(parentCtx, spanName)
 		defer span.End()
 
+		// Add span attributes including node URL
+		span.SetAttributes(
+			attribute.String("http.method", method),
+			attribute.String("http.route", path),
+			attribute.String("node.url", s.service.GetNodeUrl()),
+		)
+
 		// Store the traced context in the UserValue so handlers can access it if needed
 		// Note: fasthttp doesn't use context.Context natively for cancellation in the same way net/http does,
 		// but we need it for OTel propagation.
@@ -102,6 +109,7 @@ func (s *Server) traceMiddleware(next fasthttp.RequestHandler) fasthttp.RequestH
 			attribute.String("http.method", method),
 			attribute.String("http.route", path),
 			attribute.Int("http.status_code", status),
+			attribute.String("node.url", s.service.GetNodeUrl()),
 		)
 
 		s.reqCounter.Add(tracedCtx, 1, attrs)

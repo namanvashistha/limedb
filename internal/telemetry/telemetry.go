@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
@@ -19,7 +20,7 @@ import (
 
 // Init initializes the OpenTelemetry SDK.
 // If endpoint is empty, it returns a no-op shutdown function.
-func Init(serviceName, serviceVersion, endpoint string) (func(context.Context) error, error) {
+func Init(serviceName, serviceVersion, endpoint, nodeURL string) (func(context.Context) error, error) {
 	if endpoint == "" {
 		log.Println("⚠️  OTel endpoint not configured, telemetry disabled")
 		return func(context.Context) error { return nil }, nil
@@ -51,6 +52,9 @@ func Init(serviceName, serviceVersion, endpoint string) (func(context.Context) e
 		semconv.SchemaURL,
 		semconv.ServiceName(serviceName),
 		semconv.ServiceVersion(serviceVersion),
+		semconv.ServiceInstanceID(nodeURL),
+		attribute.String("node.url", nodeURL),
+		attribute.String("deployment.environment", "production"),
 	)
 
 	// Create TraceProvider

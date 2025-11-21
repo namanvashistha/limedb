@@ -409,6 +409,12 @@ processors:
       - key: host.name
         from_attribute: host.name
         action: upsert
+      - key: node.url
+        value: \"http://\$CONTAINER_IP:8484\"
+        action: upsert
+      - key: limedb.node.url
+        value: \"http://\$CONTAINER_IP:8484\"
+        action: upsert
 
 exporters:
   otlphttp/grafana_cloud:

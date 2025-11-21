@@ -21,7 +21,7 @@ func main() {
 	cfg := config.Load()
 
 	// Initialize Telemetry
-	shutdownTelemetry, err := telemetry.Init("limedb-node", "1.0.0", cfg.OtelEndpoint)
+	shutdownTelemetry, err := telemetry.Init("limedb-node", "1.0.0", cfg.OtelEndpoint, cfg.NodeUrl)
 	if err != nil {
 		log.Fatalf("Failed to initialize telemetry: %v", err)
 	}

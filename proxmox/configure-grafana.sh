@@ -76,8 +76,6 @@ echo ""
 # Create ~/.grafana directory and config file
 mkdir -p ~/.grafana
 cat > ~/.grafana/config << EOF
-# Grafana Cloud Configuration for LimeDB
-# Generated on $(date)
 GRAFANA_OTLP_ENDPOINT='$GRAFANA_OTLP_ENDPOINT'
 GRAFANA_CLOUD_USERNAME='$GRAFANA_CLOUD_USERNAME'
 GRAFANA_CLOUD_PASSWORD='$GRAFANA_CLOUD_PASSWORD'
