@@ -1,0 +1,311 @@
+/* Global Styles */
+Screen {
+    layout: vertical;
+    background: #121212;
+    color: #e5e7eb;
+}
+
+/* Header & Logo */
+Header {
+    dock: top;
+    background: #1a1a1a;
+    color: #84cc16;
+    height: 1;
+}
+
+Logo {
+    height: 6;
+    width: 100%;
+    content-align: center middle;
+    background: #121212;
+    margin-bottom: 1;
+    color: #84cc16;
+}
+
+/* Typography */
+.section-title {
+    background: #3f6212;
+    color: #ffffff;
+    text-style: bold;
+    padding: 0 1;
+    width: 100%;
+    margin-bottom: 1;
+}
+
+.subtitle {
+    text-align: center;
+    color: #84cc16;
+    margin-top: 1;
+    text-style: bold;
+}
+
+/* Layout Containers */
+#main_grid {
+    layout: grid;
+    grid-size: 2;
+    grid-columns: 2fr 1fr;
+    grid-rows: 1fr;
+    grid-gutter: 1;
+    padding: 1;
+    height: 1fr;
+}
+
+#left_panel {
+    layout: vertical;
+    height: 100%;
+}
+
+#right_panel {
+    layout: vertical;
+    height: 100%;
+}
+
+/* Cards / Containers */
+.card {
+    background: #1a1a1a;
+    border: solid #3f6212;
+    padding: 0;
+    margin-bottom: 1;
+    height: auto;
+}
+
+#status_container {
+    height: 1fr;
+}
+
+#gossip_container {
+    height: 1fr;
+}
+
+#ring_container {
+    height: auto;
+    min-height: 15;
+}
+
+/* Summary Cards */
+#summary_row {
+    layout: horizontal;
+    height: auto;
+    margin-bottom: 1;
+    align: center middle;
+}
+
+.summary-card {
+    width: 1fr;
+    height: 3;
+    background: #1a1a1a;
+    border-left: solid #84cc16;
+    padding: 0 1;
+    margin: 0 1;
+    content-align: center middle;
+}
+
+/* Ring Visualizer */
+#ring_bar_container {
+    height: 3;
+    width: 100%;
+    layout: horizontal;
+    background: #262626;
+    margin: 1 0;
+}
+
+RingSegment {
+    height: 100%;
+}
+
+#ring_legend {
+    height: auto;
+    max-height: 10;
+}
+
+/* Data Tables */
+DataTable {
+    background: #1a1a1a;
+    border: none;
+    scrollbar-background: #1a1a1a;
+    scrollbar-color: #3f6212;
+}
+
+DataTable > .datatable--header {
+    background: #262626;
+    color: #84cc16;
+    text-style: bold;
+}
+
+DataTable > .datatable--cursor {
+    background: #3f6212;
+    color: #ffffff;
+}
+
+/* Data Explorer */
+#explorer_wrapper {
+    layout: horizontal;
+    height: 1fr;
+}
+
+#explorer_main {
+    width: 1fr;
+    height: 100%;
+    padding: 1;
+}
+
+#history_sidebar {
+    width: 30;
+    height: 100%;
+    border-left: solid #3f6212;
+    background: #1a1a1a;
+    padding: 0 1;
+}
+
+#history_list {
+    height: 1fr;
+    margin-top: 1;
+    border: solid #3f6212;
+}
+
+ListItem {
+    padding: 1;
+    background: #1a1a1a;
+}
+
+ListItem:hover {
+    background: #262626;
+}
+
+.input-group {
+    height: auto;
+    border: solid #3f6212;
+    padding: 1;
+    background: #1a1a1a;
+    margin-bottom: 1;
+}
+
+Input {
+    margin-bottom: 1;
+    border: solid #84cc16;
+    background: #000000;
+}
+
+Input:focus {
+    border: double #a3e635;
+}
+
+.button-row {
+    height: auto;
+    align: center middle;
+    margin-top: 1;
+}
+
+Button {
+    margin: 0 1;
+    min-width: 12;
+}
+
+Button.primary {
+    background: #3b82f6;
+    color: white;
+}
+
+Button.success {
+    background: #84cc16;
+    color: black;
+}
+
+Button.error {
+    background: #ef4444;
+    color: white;
+}
+
+#response_output {
+    border: solid #3f6212;
+    padding: 1;
+    height: 1fr;
+    background: #1a1a1a;
+    overflow: auto;
+}
+
+/* Tabs */
+TabbedContent {
+    height: 1fr;
+}
+
+TabPane {
+    padding: 0;
+}
+
+Tabs {
+    dock: top;
+    background: #1a1a1a;
+}
+
+Tab {
+    color: #888888;
+}
+
+Tab.-active {
+    color: #84cc16;
+    background: #262626;
+    text-style: bold;
+    border-bottom: solid #84cc16;
+}
+
+/* Help Modal */
+HelpModal {
+    align: center middle;
+}
+
+#help_container {
+    width: 60;
+    height: auto;
+    background: #1a1a1a;
+    border: solid #84cc16;
+    padding: 2;
+}
+
+/* Node Inspector Modal */
+NodeDetailsModal {
+    align: center middle;
+}
+
+#node_inspector_container {
+    width: 80%;
+    height: 80%;
+    background: #1a1a1a;
+    border: solid #84cc16;
+    padding: 1;
+    layout: vertical;
+}
+
+#inspector_content {
+    height: 1fr;
+    border: solid #3f6212;
+    margin: 1 0;
+    background: #000000;
+    overflow: auto;
+}
+
+/* Events */
+#events_table {
+    height: 1fr;
+    padding: 1;
+}
+
+/* Filter Input */
+#filter_input {
+    margin: 0 1 1 1;
+    border: none;
+    background: #262626;
+    height: 1;
+    padding: 0 1;
+}
+
+#filter_input:focus {
+    border: none;
+    background: #3f6212;
+}
+
+/* Loading Indicator */
+LoadingIndicator {
+    color: #84cc16;
+    height: auto;
+}

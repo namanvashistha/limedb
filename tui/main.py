@@ -10,20 +10,24 @@ from textual.widgets import (
     Input,
     Button,
     Pretty,
+    ListView,
+    ListItem,
+    LoadingIndicator,
 )
-from textual.containers import Container, Horizontal, Grid
+from textual.containers import Container, Horizontal, Grid, Vertical
+from textual.binding import Binding
+from textual.screen import ModalScreen
 from client import ClusterClient
 from textual import log
 import asyncio
 import statistics
 import sys
 import argparse
+import json
+from datetime import datetime
 
 # Theme Colors
 LIME_GREEN = "#84cc16"
-DARK_BG = "#121212"
-MUTED_GREEN = "#3f6212"
-WHITE = "#ffffff"
 ERROR_RED = "#ef4444"
 
 ASCII_LOGO = r"""
@@ -41,6 +45,46 @@ class Logo(Static):
         return f"[{LIME_GREEN}]{ASCII_LOGO}[/]"
 
 
+class HelpModal(ModalScreen):
+    """A modal screen to show help."""
+
+    def compose(self) -> ComposeResult:
+        with Container(id="help_container"):
+            yield Label("LimeDB TUI Help", classes="section-title")
+            yield Label("\nNavigation:", classes="subtitle")
+            yield Label("  1       : Switch to Overview Tab")
+            yield Label("  2       : Switch to Data Explorer Tab")
+            yield Label("  3       : Switch to Events Tab")
+            yield Label("  q       : Quit")
+            yield Label("  r       : Force Refresh")
+            yield Label("  h       : Toggle this Help")
+            yield Label("\nInteraction:", classes="subtitle")
+            yield Label("  Enter   : Inspect Node (in Overview)")
+            yield Label("  Click rows in tables to see details.")
+            yield Button("Close", variant="primary", id="close_help")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss()
+
+
+class NodeDetailsModal(ModalScreen):
+    """A modal screen to inspect node details."""
+
+    def __init__(self, node_url: str, data: dict):
+        super().__init__()
+        self.node_url = node_url
+        self.data = data
+
+    def compose(self) -> ComposeResult:
+        with Container(id="node_inspector_container"):
+            yield Label(f"Node Inspector: {self.node_url}", classes="section-title")
+            yield Pretty(self.data, id="inspector_content")
+            yield Button("Close", variant="primary", id="close_inspector")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss()
+
+
 class CyclicDataTable(DataTable):
     """A DataTable that wraps selection from top-to-bottom and vice-versa."""
 
@@ -55,6 +99,21 @@ class CyclicDataTable(DataTable):
             self.move_cursor(row=self.row_count - 1)
         else:
             super().action_cursor_up()
+
+
+class SummaryCard(Static):
+    """A simple summary card."""
+    
+    def __init__(self, label: str, value: str, **kwargs):
+        super().__init__(**kwargs)
+        self.label_text = label
+        self.value_text = value
+
+    def compose(self) -> ComposeResult:
+        yield Label(f"{self.label_text}: {self.value_text}", classes="summary-text")
+
+    def update_value(self, value: str) -> None:
+        self.query_one(Label).update(f"[bold]{self.label_text}:[/] {value}")
 
 
 class GossipDetails(Static):
@@ -80,7 +139,7 @@ class GossipDetails(Static):
         table.clear()
 
         if "error" in gossip_data or not gossip_data:
-            info_label.update(f"[red]No gossip data available for {node_url}[/]")
+            info_label.update(f"[{ERROR_RED}]No gossip data available for {node_url}[/]")
             return
 
         # Check if standalone
@@ -110,7 +169,7 @@ class GossipDetails(Static):
         elif cluster_health == "degraded":
             health_colored = f"[yellow]⚠ {cluster_health.upper()}[/]"
         elif cluster_health == "critical":
-            health_colored = f"[red]✗ {cluster_health.upper()}[/]"
+            health_colored = f"[{ERROR_RED}]✗ {cluster_health.upper()}[/]"
         else:
             health_colored = f"[dim]{cluster_health.upper()}[/]"
 
@@ -142,7 +201,7 @@ class GossipDetails(Static):
             elif status == "stale":
                 status_colored = f"[yellow]● {status.upper()}[/]"
             elif status == "dead":
-                status_colored = f"[red]● {status.upper()}[/]"
+                status_colored = f"[{ERROR_RED}]● {status.upper()}[/]"
             else:
                 status_colored = f"[dim]● {status.upper()}[/]"
 
@@ -152,7 +211,7 @@ class GossipDetails(Static):
             elif lag <= 5:
                 lag_colored = f"[yellow]{lag}[/]"
             else:
-                lag_colored = f"[red]{lag}[/]"
+                lag_colored = f"[{ERROR_RED}]{lag}[/]"
 
             table.add_row(
                 f"[bold white]{url}[/]",
@@ -167,6 +226,7 @@ class ClusterStatus(Static):
 
     def compose(self) -> ComposeResult:
         yield Label("CLUSTER NODES & METRICS", classes="section-title")
+        yield Input(placeholder="Filter nodes...", id="filter_input")
         yield CyclicDataTable(id="status_table")
 
     def on_mount(self) -> None:
@@ -178,15 +238,28 @@ class ClusterStatus(Static):
         table.zebra_stripes = False
         table.show_header = True
 
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Refresh table when filter changes."""
+        if hasattr(self, 'status_data'):
+            self.update_status(self.status_data, self.metrics_data, self.gossip_data)
+
     def update_status(self, status_data: dict, metrics_data: dict, gossip_data: dict) -> None:
         table = self.query_one(CyclicDataTable)
+        filter_text = self.query_one("#filter_input").value.lower()
+        
         # Save cursor position
         cursor_row = table.cursor_row
         table.clear()
 
         sorted_urls = sorted(status_data.keys())
+        filtered_urls = []
 
         for url in sorted_urls:
+            # Filter logic
+            if filter_text and filter_text not in url.lower():
+                continue
+            
+            filtered_urls.append(url)
             data = status_data[url]
             metrics = metrics_data.get(url, {})
             gossip = gossip_data.get(url, {})
@@ -225,7 +298,7 @@ class ClusterStatus(Static):
                 elif cluster_health == "degraded":
                     gossip_status = f"[yellow]⚠ {active_peers}/{total_peers}[/]"
                 elif cluster_health == "critical":
-                    gossip_status = f"[red]✗ {active_peers}/{total_peers}[/]"
+                    gossip_status = f"[{ERROR_RED}]✗ {active_peers}/{total_peers}[/]"
                 else:
                     gossip_status = f"[dim]? {active_peers}/{total_peers}[/]"
 
@@ -249,7 +322,7 @@ class ClusterStatus(Static):
                 elif lat_val < 50:
                     latency = f"[yellow]{latency_str}[/]"
                 else:
-                    latency = f"[red]{latency_str}[/]"
+                    latency = f"[{ERROR_RED}]{latency_str}[/]"
 
             table.add_row(
                 status_icon,
@@ -263,9 +336,11 @@ class ClusterStatus(Static):
                 latency,
             )
 
-        # Store gossip data for selection events
+        # Store data for selection events
         self.gossip_data = gossip_data
-        self.sorted_urls = sorted_urls
+        self.status_data = status_data
+        self.metrics_data = metrics_data
+        self.sorted_urls = filtered_urls
         
         # Restore cursor if possible, otherwise select first row
         if cursor_row < table.row_count:
@@ -276,14 +351,15 @@ class ClusterStatus(Static):
         # Auto-update gossip details for the selected row
         if table.row_count > 0:
             current_row = table.cursor_row
-            if current_row < len(sorted_urls):
-                selected_url = sorted_urls[current_row]
+            if current_row < len(filtered_urls):
+                selected_url = filtered_urls[current_row]
                 selected_gossip = gossip_data.get(selected_url, {})
                 try:
                     gossip_widget = self.app.query_one(GossipDetails)
                     gossip_widget.update_gossip_details(selected_url, selected_gossip)
                 except Exception as e:
-                    log(f"Error auto-updating gossip details: {e}")
+                    # log(f"Error auto-updating gossip details: {e}")
+                    pass
 
     def on_data_table_row_selected(self, event) -> None:
         """Handle row selection to show gossip details."""
@@ -316,7 +392,6 @@ class ClusterStatus(Static):
 
 class RingSegment(Static):
     """A single segment of the ring visualization."""
-
     pass
 
 
@@ -402,7 +477,7 @@ class RingVisualizer(Static):
                 elif abs(pct_dev) < 20:
                     dev_colored = f"[yellow]{dev_str}[/]"
                 else:
-                    dev_colored = f"[red]{dev_str}[/]"
+                    dev_colored = f"[{ERROR_RED}]{dev_str}[/]"
 
                 # Create visual segment
                 segment = RingSegment()
@@ -425,201 +500,175 @@ class DataExplorer(Static):
 
     def compose(self) -> ComposeResult:
         yield Label("DATA EXPLORER", classes="section-title")
-        yield Container(
-            Input(placeholder="Key", id="key_input"),
-            Input(placeholder="Value (for SET)", id="value_input"),
-            Horizontal(
-                Button("GET", variant="primary", id="btn_get"),
-                Button("SET", variant="success", id="btn_set"),
-                Button("DELETE", variant="error", id="btn_del"),
-                classes="button-row",
-            ),
-            classes="input-container",
-        )
-        yield Label("Response", classes="subtitle")
-        yield Pretty("", id="response_output")
+        with Container(id="explorer_wrapper"):
+            with Container(id="explorer_main"):
+                with Container(classes="input-group"):
+                    yield Input(placeholder="Key", id="key_input")
+                    yield Input(placeholder="Value (for SET)", id="value_input")
+                    with Horizontal(classes="button-row"):
+                        yield Button("GET", variant="primary", id="btn_get")
+                        yield Button("SET", variant="success", id="btn_set")
+                        yield Button("DELETE", variant="error", id="btn_del")
+                
+                yield Label("Response", classes="subtitle")
+                yield Container(
+                    Pretty("", id="response_output"),
+                    LoadingIndicator(id="loading_indicator"),
+                    id="response_container"
+                )
+            
+            with Vertical(id="history_sidebar"):
+                yield Label("History", classes="subtitle")
+                yield ListView(id="history_list")
+
+    def on_mount(self) -> None:
+        self.query_one("#loading_indicator").display = False
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         key = self.query_one("#key_input").value
         value = self.query_one("#value_input").value
         output = self.query_one("#response_output")
+        loading = self.query_one("#loading_indicator")
+        history_list = self.query_one("#history_list")
         client = self.app.client  # Access client from App
 
         if not key:
-            output.update({"error": "Key is required"})
+            self.app.notify("Key is required", severity="error")
             return
 
-        output.update("Requesting...")
-
+        # Show loading, hide output
+        output.display = False
+        loading.display = True
+        
+        # Add to history
+        action = "UNKNOWN"
         if event.button.id == "btn_get":
+            action = "GET"
             resp = await client.get_key(key)
-            output.update(resp)
         elif event.button.id == "btn_set":
+            action = "SET"
             resp = await client.set_key(key, value)
-            output.update(resp)
+            if "error" not in resp:
+                self.app.notify(f"Set {key} successfully", severity="information")
         elif event.button.id == "btn_del":
+            action = "DEL"
             resp = await client.delete_key(key)
-            output.update(resp)
+            if "error" not in resp:
+                self.app.notify(f"Deleted {key}", severity="warning")
+        
+        # Hide loading, show output
+        loading.display = False
+        output.display = True
+
+        # Try to parse JSON for pretty printing
+        try:
+            if isinstance(resp, dict) and "body" in resp:
+                 body_json = json.loads(resp["body"])
+                 resp["body"] = body_json
+        except:
+            pass
+
+        output.update(resp)
+        
+        if "error" in resp:
+            self.app.notify(f"Error: {resp['error']}", severity="error")
+        
+        # Add history item
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        history_item = ListItem(Label(f"[{timestamp}] {action} {key}"))
+        history_item.action = action
+        history_item.key = key
+        history_item.value = value
+        history_list.append(history_item)
+        history_list.index = len(history_list.children) - 1
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        """Populate inputs from history."""
+        item = event.item
+        if hasattr(item, 'key'):
+            self.query_one("#key_input").value = item.key
+            self.query_one("#value_input").value = item.value if item.value else ""
+
+
+class EventLog(Static):
+    """A widget to display cluster events."""
+
+    def compose(self) -> ComposeResult:
+        yield Label("CLUSTER EVENT LOG", classes="section-title")
+        yield DataTable(id="events_table")
+
+    def on_mount(self) -> None:
+        table = self.query_one(DataTable)
+        table.add_columns("TIME", "EVENT TYPE", "DETAILS")
+        table.cursor_type = "row"
+        table.zebra_stripes = True
+
+    def add_event(self, event_type: str, details: str) -> None:
+        table = self.query_one(DataTable)
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        
+        # Color code event types
+        if "DOWN" in event_type or "CRITICAL" in event_type:
+            type_colored = f"[{ERROR_RED}]{event_type}[/]"
+        elif "JOIN" in event_type or "HEALTHY" in event_type:
+            type_colored = f"[{LIME_GREEN}]{event_type}[/]"
+        else:
+            type_colored = f"[yellow]{event_type}[/]"
+            
+        table.add_row(timestamp, type_colored, details)
+        table.move_cursor(row=table.row_count - 1)
 
 
 class LimeDB(App):
     """A Textual app to manage LimeDB Cluster."""
+
+    CSS_PATH = "styles.tcss"
+    
+    BINDINGS = [
+        Binding("q", "quit", "Quit"),
+        Binding("r", "refresh", "Refresh Now"),
+        Binding("1", "switch_tab('tab_overview')", "Overview"),
+        Binding("2", "switch_tab('tab_explorer')", "Data Explorer"),
+        Binding("3", "switch_tab('tab_events')", "Events"),
+        Binding("h", "toggle_help", "Help"),
+        Binding("enter", "inspect_node", "Inspect Node"),
+    ]
 
     def __init__(self, host_urls, **kwargs):
         super().__init__(**kwargs)
         if not host_urls:
             raise ValueError("host_urls cannot be empty")
         self.host_urls = host_urls
-
-    CSS = """
-    Screen {
-        layout: vertical;
-        background: #121212;
-    }
-    
-    /* Header & Logo */
-    Logo {
-        height: 8;
-        width: auto;
-        margin-bottom: 1;
-        align-horizontal: center;
-    }
-    
-    .section-title {
-        background: #3f6212;
-        color: #ffffff;
-        text-style: bold;
-        padding: 0 1;
-        width: 100%;
-    }
-    
-    .subtitle {
-        text-align: center;
-        color: #84cc16;
-        margin-top: 1;
-        text-style: bold;
-    }
-
-    /* Layout Containers */
-    #main_grid {
-        layout: grid;
-        grid-size: 3;
-        grid-columns: 1fr 1fr 1fr;
-        grid-gutter: 1;
-        padding: 1;
-    }
-    
-    #status_container, #ring_container, #gossip_container {
-        height: 100%;
-        border: solid #3f6212;
-        background: #1a1a1a;
-    }
-    
-    .gossip-container {
-        padding: 1;
-    }
-    
-    #gossip_info {
-        margin-bottom: 1;
-        padding: 1;
-        background: #262626;
-        border: solid #3f6212;
-    }
-    
-    /* Ring Bar */
-    #ring_bar_container {
-        height: 3;
-        width: 100%;
-        layout: horizontal;
-        background: #262626;
-        margin: 1 0;
-    }
-    
-    RingSegment {
-        height: 100%;
-    }
-    
-    /* Data Tables */
-    CyclicDataTable {
-        background: #1a1a1a;
-        border: none;
-    }
-    
-    CyclicDataTable > .datatable--header {
-        background: #262626;
-        color: #84cc16;
-        text-style: bold;
-    }
-    
-    CyclicDataTable > .datatable--cursor {
-        background: #3f6212;
-        color: #ffffff;
-    }
-    
-    /* Data Explorer */
-    .input-container {
-        padding: 1;
-        border: solid #3f6212;
-        margin-bottom: 1;
-    }
-    
-    Input {
-        margin-bottom: 1;
-        border: solid #84cc16;
-    }
-    
-    .button-row {
-        height: auto;
-        align: center middle;
-    }
-    
-    Button {
-        margin: 0 1;
-    }
-    
-    #response_output {
-        border: solid #3f6212;
-        padding: 1;
-        height: 1fr;
-        background: #1a1a1a;
-    }
-    
-    /* Tabs */
-    TabbedContent {
-        height: 1fr;
-    }
-    
-    TabPane {
-        padding: 0;
-    }
-    
-    Tab {
-        /* cursor not supported */
-    }
-    
-    #balance_stats {
-        text-align: center;
-        color: #84cc16;
-        padding: 1;
-    }
-    """
-
-    BINDINGS = [("q", "quit", "Quit"), ("r", "refresh", "Refresh Now")]
+        self.previous_status_data = {}
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield Logo()
 
-        with TabbedContent():
+        with TabbedContent(initial="tab_overview"):
             with TabPane("Overview", id="tab_overview"):
-                yield Grid(
-                    Container(ClusterStatus(), id="status_container"),
-                    Container(RingVisualizer(), id="ring_container"),
-                    Container(GossipDetails(), id="gossip_container"),
-                    id="main_grid",
-                )
+                # Summary Cards
+                with Horizontal(id="summary_row"):
+                    yield SummaryCard("Cluster Health", "Unknown", id="card_health", classes="summary-card")
+                    yield SummaryCard("Active Nodes", "0", id="card_nodes", classes="summary-card")
+                    yield SummaryCard("Total Keys", "Unknown", id="card_keys", classes="summary-card")
+
+                # Main Grid
+                with Container(id="main_grid"):
+                    # Left Panel: Status and Ring
+                    with Vertical(id="left_panel"):
+                        yield Container(ClusterStatus(), id="status_container", classes="card")
+                        yield Container(RingVisualizer(), id="ring_container", classes="card")
+                    
+                    # Right Panel: Gossip Details
+                    with Vertical(id="right_panel"):
+                        yield Container(GossipDetails(), id="gossip_container", classes="card")
+
             with TabPane("Data Explorer", id="tab_explorer"):
                 yield DataExplorer()
+                
+            with TabPane("Events", id="tab_events"):
+                yield EventLog()
 
         yield Footer()
 
@@ -628,11 +677,42 @@ class LimeDB(App):
         self.set_interval(2.0, self.update_data)
         self.call_later(self.update_data)
 
+    def action_switch_tab(self, tab_id: str) -> None:
+        self.query_one(TabbedContent).active = tab_id
+
+    def action_toggle_help(self) -> None:
+        self.push_screen(HelpModal())
+
+    def action_inspect_node(self) -> None:
+        """Inspect the currently selected node in the status table."""
+        # Only works if we are on the overview tab
+        if self.query_one(TabbedContent).active != "tab_overview":
+            return
+            
+        status_widget = self.query_one(ClusterStatus)
+        table = status_widget.query_one(CyclicDataTable)
+        
+        if hasattr(status_widget, 'sorted_urls') and table.cursor_row < len(status_widget.sorted_urls):
+            url = status_widget.sorted_urls[table.cursor_row]
+            
+            # Aggregate all data we have for this node
+            node_data = {
+                "status": status_widget.status_data.get(url, {}),
+                "metrics": status_widget.metrics_data.get(url, {}),
+                "gossip": status_widget.gossip_data.get(url, {})
+            }
+            
+            self.push_screen(NodeDetailsModal(url, node_data))
+
     async def update_data(self) -> None:
         # First, discover new hosts through gossip
         await self.discover_cluster_hosts()
         
         status_data = await self.client.get_all_nodes_status()
+        
+        # Check for events
+        self.check_for_events(status_data)
+        self.previous_status_data = status_data
 
         ring_data = {"error": "No active nodes"}
         for url, data in status_data.items():
@@ -664,6 +744,58 @@ class LimeDB(App):
 
         self.query_one(ClusterStatus).update_status(status_data, metrics_data, gossip_data)
         self.query_one(RingVisualizer).update_ring(ring_data)
+        
+        # Update Summary Cards
+        active_nodes = len([u for u in status_data if "error" not in status_data[u]])
+        self.query_one("#card_nodes").update_value(f"[green]{active_nodes}[/]")
+        
+        # Determine overall health
+        health = "Healthy"
+        if active_nodes < len(status_data):
+            health = "Degraded"
+        if active_nodes == 0:
+            health = "Critical"
+        
+        color = "green" if health == "Healthy" else "yellow" if health == "Degraded" else "red"
+        self.query_one("#card_health").update_value(f"[{color}]{health}[/]")
+        
+        # Keys count
+        total_keys = 0
+        if "ranges" in ring_data:
+             for ranges in ring_data["ranges"].values():
+                 for r in ranges:
+                     total_keys += r.get("size", 0)
+        self.query_one("#card_keys").update_value(f"[blue]{total_keys}[/]")
+
+    def check_for_events(self, current_status: dict) -> None:
+        """Compare current status with previous to generate events."""
+        if not self.previous_status_data:
+            return
+
+        event_log = self.query_one(EventLog)
+        
+        # Check for node status changes
+        all_urls = set(current_status.keys()) | set(self.previous_status_data.keys())
+        
+        for url in all_urls:
+            prev = self.previous_status_data.get(url, {})
+            curr = current_status.get(url, {})
+            
+            prev_err = "error" in prev
+            curr_err = "error" in curr
+            
+            if not prev and curr:
+                event_log.add_event("NODE JOIN", f"Node {url} discovered")
+                self.notify(f"Node {url} joined the cluster", severity="information")
+            elif prev and not curr:
+                event_log.add_event("NODE LEFT", f"Node {url} lost")
+                self.notify(f"Node {url} left the cluster", severity="warning")
+            elif prev_err and not curr_err:
+                event_log.add_event("NODE UP", f"Node {url} is back online")
+                self.notify(f"Node {url} is back online", severity="information")
+            elif not prev_err and curr_err:
+                event_log.add_event("NODE DOWN", f"Node {url} is unreachable")
+                self.notify(f"Node {url} is unreachable", severity="error")
 
     async def discover_cluster_hosts(self) -> None:
         """Discover all cluster hosts through gossip protocol."""
@@ -674,10 +806,8 @@ class LimeDB(App):
                 if "error" not in gossip_data:
                     # Update discovered hosts based on gossip data
                     self.client.update_discovered_hosts(gossip_data, url)
-                    log(f"Discovered cluster hosts: {self.client.get_all_discovered_hosts()}")
                     break
             except Exception as e:
-                log(f"Failed to get gossip from {url}: {e}")
                 continue
 
     async def fetch_node_metrics(self, base_url: str) -> dict:
