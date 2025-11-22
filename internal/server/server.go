@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"limedb/internal/gossiper"
 	"limedb/internal/logger"
+	"limedb/internal/messenger"
 	"limedb/internal/node"
 	"time"
 
@@ -262,10 +263,19 @@ func (s *Server) handleGossip(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	// Pass the request body to the gossiper
+	// The request body contains a Message struct from messenger
 	requestBody := ctx.PostBody()
-	resp := s.gossiper.HandleGossip(requestBody)
-	
+
+	// Extract the GossipMessage from the Message wrapper
+	var msg messenger.Message
+	if err := json.Unmarshal(requestBody, &msg); err != nil {
+		logger.Error("Failed to unmarshal message", "error", err.Error())
+		ctx.Error("Invalid message format", fasthttp.StatusBadRequest)
+		return
+	}
+
+	// Pass the payload (which is the GossipMessage) to the gossiper
+	resp := s.gossiper.HandleGossip(msg.Payload)
 	body, _ := json.Marshal(resp)
 	ctx.SetContentType("application/json")
 	ctx.SetBody(body)

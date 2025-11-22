@@ -63,9 +63,13 @@ func (g *Gossiper) HandleGossip(requestBody []byte) map[string]interface{} {
 	switch gossipMsg.Type {
 	case "GOSSIP_SYN":
 		var synPayload SynPayload
-		payloadBytes, _ := json.Marshal(gossipMsg.Payload)
+		payloadBytes, err := json.Marshal(gossipMsg.Payload)
+		if err != nil {
+			logger.Error("Failed to marshal SYN payload", "error", err.Error())
+			return map[string]interface{}{"error": "Failed to marshal payload"}
+		}
 		if err := json.Unmarshal(payloadBytes, &synPayload); err != nil {
-			logger.Error("Invalid SYN payload", "error", err.Error())
+			logger.Error("Invalid SYN payload", "error", err.Error(), "payload", string(payloadBytes))
 			return map[string]interface{}{"error": "Invalid SYN payload"}
 		}
 
@@ -83,9 +87,13 @@ func (g *Gossiper) HandleGossip(requestBody []byte) map[string]interface{} {
 
 	case "GOSSIP_ACK2":
 		var ack2Payload Ack2Payload
-		payloadBytes, _ := json.Marshal(gossipMsg.Payload)
+		payloadBytes, err := json.Marshal(gossipMsg.Payload)
+		if err != nil {
+			logger.Error("Failed to marshal ACK2 payload", "error", err.Error())
+			return map[string]interface{}{"error": "Failed to marshal payload"}
+		}
 		if err := json.Unmarshal(payloadBytes, &ack2Payload); err != nil {
-			logger.Error("Invalid ACK2 payload", "error", err.Error())
+			logger.Error("Invalid ACK2 payload", "error", err.Error(), "payload", string(payloadBytes))
 			return map[string]interface{}{"error": "Invalid ACK2 payload"}
 		}
 
@@ -103,7 +111,7 @@ func (g *Gossiper) HandleGossip(requestBody []byte) map[string]interface{} {
 	}
 }
 func (g *Gossiper) StartGossiping() {
-	gossipTicker := time.NewTicker(5 * time.Second)
+	gossipTicker := time.NewTicker(30 * time.Second)
 	summaryTicker := time.NewTicker(60 * time.Second)
 
 	go func() {
@@ -163,12 +171,19 @@ func (g *Gossiper) gossipRound() {
 		"target_heartbeat", peersSnapshot[peer],
 	)
 
-	SynPayload := SynPayload{
+	synPayload := SynPayload{
 		Digests: g.buildDigests(),
 	}
-	payloadBytes, err := json.Marshal(SynPayload)
+
+	// Create gossip message and send via messenger
+	gossipMsg := GossipMessage{
+		Type:    "GOSSIP_SYN",
+		Payload: synPayload,
+	}
+
+	payloadBytes, err := json.Marshal(gossipMsg)
 	if err != nil {
-		logger.Error("Failed to marshal SynPayload", "error", err)
+		logger.Error("Failed to marshal gossip message", "error", err)
 		return
 	}
 	peerUrl := fmt.Sprintf("%s/gossip", peer)
@@ -182,7 +197,7 @@ func (g *Gossiper) gossipRound() {
 	} else {
 		logger.Info("Gossip SYN sent successfully",
 			"peer", peer,
-			"digest_count", len(SynPayload.Digests),
+			"digest_count", len(synPayload.Digests),
 		)
 	}
 }
@@ -415,6 +430,17 @@ func (g *Gossiper) handleSyn(payload SynPayload) AckPayload {
 		}
 
 		localHeartbeat, exists := g.peerHeartbeats[digest.NodeURL]
+		
+		// Add new peer if not already known
+		if !exists {
+			g.peers = append(g.peers, digest.NodeURL)
+			logger.Info("New peer discovered",
+				"peer", digest.NodeURL,
+				"heartbeat", digest.Heartbeat,
+				"total_peers", len(g.peers),
+			)
+		}
+		
 		if !exists || digest.Heartbeat > localHeartbeat {
 			// Update our record if the received heartbeat is newer
 			oldHeartbeat := g.peerHeartbeats[digest.NodeURL]
