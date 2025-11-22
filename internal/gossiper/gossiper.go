@@ -171,7 +171,8 @@ func (g *Gossiper) gossipRound() {
 		logger.Error("Failed to marshal SynPayload", "error", err)
 		return
 	}
-	message := messenger.NewMessage("GOSSIP_SYN", payloadBytes, g.currentNodeUrl, peer)
+	peerUrl := fmt.Sprintf("%s/gossip", peer)
+	message := messenger.NewMessage("GOSSIP_SYN", payloadBytes, g.currentNodeUrl, peerUrl)
 	if err := g.messenger.SendMessage(message); err != nil {
 		logger.Error("Failed to send gossip SYN",
 			"peer", peer,
