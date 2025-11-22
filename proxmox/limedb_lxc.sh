@@ -465,6 +465,9 @@ processors:
       - key: service.name
         value: limedb-node
         action: upsert
+      - key: service.namespace
+        value: limedb
+        action: upsert
       - key: service.version
         value: \${LATEST_VERSION}
         action: upsert
@@ -474,8 +477,8 @@ processors:
       - key: deployment.environment
         value: production
         action: upsert
-      - key: host.name
-        from_attribute: host.name
+      - key: host
+        value: \"http://\${CONTAINER_IP}:8484\"
         action: upsert
       - key: node.url
         value: \"http://\${CONTAINER_IP}:8484\"
