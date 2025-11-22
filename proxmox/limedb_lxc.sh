@@ -478,6 +478,9 @@ processors:
         value: production
         action: upsert
       - key: host.name
+        value: \"limedb/\${CONTAINER_IP}\"
+        action: upsert
+      - key: host.ip
         value: \"\${CONTAINER_IP}\"
         action: upsert
       - key: node.url
