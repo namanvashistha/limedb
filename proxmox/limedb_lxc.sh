@@ -409,21 +409,15 @@ receivers:
       http:
         endpoint: 0.0.0.0:4318
 
-  # System resource metrics - COMPREHENSIVE COLLECTION
+  # System resource metrics
   hostmetrics:
     collection_interval: 10s
     scrapers:
       cpu:
         metrics:
-          system.cpu.time:
-            enabled: true
           system.cpu.utilization:
             enabled: true
-          system.cpu.frequency:
-            enabled: true
-          system.cpu.physical.count:
-            enabled: true
-          system.cpu.logical.count:
+          system.cpu.time:
             enabled: true
       memory:
         metrics:
@@ -431,31 +425,19 @@ receivers:
             enabled: true
           system.memory.utilization:
             enabled: true
-          system.memory.limit:
-            enabled: true
       disk:
         metrics:
           system.disk.io:
             enabled: true
-          system.disk.io_time:
-            enabled: true
-          system.disk.operation_time:
-            enabled: true
           system.disk.operations:
             enabled: true
-          system.disk.pending_operations:
-            enabled: true
-          system.disk.merged:
-            enabled: true
-          system.disk.weighted_io_time:
+          system.disk.io_time:
             enabled: true
       filesystem:
         metrics:
           system.filesystem.usage:
             enabled: true
           system.filesystem.utilization:
-            enabled: true
-          system.filesystem.inodes.usage:
             enabled: true
       network:
         metrics:
@@ -465,56 +447,15 @@ receivers:
             enabled: true
           system.network.errors:
             enabled: true
-          system.network.dropped:
-            enabled: true
-          system.network.connections:
-            enabled: true
-      load:
-        metrics:
-          system.load.average.1m:
-            enabled: true
-          system.load.average.5m:
-            enabled: true
-          system.load.average.15m:
-            enabled: true
-      paging:
-        metrics:
-          system.paging.usage:
-            enabled: true
-          system.paging.utilization:
-            enabled: true
-          system.paging.faults:
-            enabled: true
-          system.paging.operations:
-            enabled: true
       process:
         metrics:
-          process.cpu.time:
-            enabled: true
           process.cpu.utilization:
             enabled: true
           process.memory.usage:
             enabled: true
-          process.memory.virtual:
-            enabled: true
-          process.disk.io:
-            enabled: true
-          process.network.io:
-            enabled: true
-          process.threads:
-            enabled: true
-          process.open_file_descriptors:
-            enabled: true
-          process.signals_pending:
-            enabled: true
-          process.context_switches:
-            enabled: true
         mute_process_name_error: true
         mute_process_exe_error: true
         mute_process_io_error: true
-        include:
-          names: ["limedb", "otelcol"]
-          match_type: regexp
 
 processors:
   batch:
