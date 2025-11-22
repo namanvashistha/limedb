@@ -451,11 +451,20 @@ processors:
       - key: service.version
         value: \$LATEST_VERSION
         action: upsert
+      - key: service.instance.id
+        value: \"http://\$CONTAINER_IP:8484\"
+        action: upsert
       - key: deployment.environment
         value: production
         action: upsert
       - key: host.name
         from_attribute: host.name
+        action: upsert
+      - key: node.url
+        value: \"http://\$CONTAINER_IP:8484\"
+        action: upsert
+      - key: limedb.node.url
+        value: \"http://\$CONTAINER_IP:8484\"
         action: upsert
 
 exporters:
@@ -548,7 +557,7 @@ WantedBy=multi-user.target
 OTELSVC
 
     # Create LimeDB systemd service with OTEL integration
-    cat > /etc/systemd/system/limedb.service << EOF
+    cat > /etc/systemd/system/limedb.service << LIMESVC
 [Unit]
 Description=LimeDB Key-Value Store
 After=network.target otel-collector.service
@@ -562,7 +571,7 @@ Environment=OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 Environment=OTEL_SERVICE_NAME=limedb
 Environment=OTEL_SERVICE_VERSION=\$LATEST_VERSION
 Environment=OTEL_ENVIRONMENT=production
-ExecStart=/usr/local/bin/limedb -server.port 8484 -node.url \"http://\$CONTAINER_IP:8484\" -node.peers \"http://\$CONTAINER_IP:8484\"
+ExecStart=/usr/local/bin/limedb -server.port 8484 -node.url \"http://${CONTAINER_IP}:8484\" -node.peers \"http://${CONTAINER_IP}:8484\"
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
@@ -570,7 +579,7 @@ StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
-EOF
+LIMESVC
     
     # Create MOTD while download happens
     cat > /etc/motd << 'MOTDEOF'
