@@ -369,7 +369,7 @@ export GRAFANA_CLOUD_PASSWORD='$GRAFANA_CLOUD_PASSWORD'
     LIMEDB_PID=\$!
     
     # Download OTEL Collector Contrib (includes all components)
-    wget -qO /tmp/otelcol.tar.gz \"https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.91.0/otelcol-contrib_0.91.0_linux_amd64.tar.gz\" &
+    wget -qO /tmp/otelcol.tar.gz \"https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.114.0/otelcol-contrib_0.114.0_linux_amd64.tar.gz\" &
     OTEL_PID=\$!
     
     # Get container IP for node URL

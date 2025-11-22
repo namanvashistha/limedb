@@ -4,9 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"limedb-go/internal/logger"
 	"limedb-go/internal/node"
-	"log"
-
 	"time"
 
 	"github.com/valyala/fasthttp"
@@ -60,7 +59,7 @@ func New(service *node.NodeService, port int) *Server {
 func (s *Server) Start() error {
 	s.httpServer.Handler = s.traceMiddleware(s.router)
 	addr := fmt.Sprintf(":%d", s.port)
-	log.Printf("Starting HTTP server on %s", addr)
+	logger.Info("Starting HTTP server", "address", addr)
 	return s.httpServer.ListenAndServe(addr)
 }
 
@@ -159,12 +158,19 @@ func (s *Server) router(ctx *fasthttp.RequestCtx) {
 }
 
 func (s *Server) handleGet(ctx *fasthttp.RequestCtx, key string) {
+	logger.Info("GET request",
+		"key", key,
+		"client.ip", ctx.RemoteIP().String(),
+	)
+	
 	resp, err := s.service.HandleGet(key)
 	if err != nil {
+		logger.Warn("GET failed", "key", key, "error", err.Error())
 		ctx.Error(err.Error(), fasthttp.StatusNotFound)
 		return
 	}
 
+	logger.Info("GET success", "key", key, "node", resp.NodeUrl)
 	body, _ := json.Marshal(resp)
 	ctx.SetContentType("application/json")
 	ctx.SetBody(body)
@@ -173,15 +179,20 @@ func (s *Server) handleGet(ctx *fasthttp.RequestCtx, key string) {
 func (s *Server) handleSet(ctx *fasthttp.RequestCtx) {
 	var req node.SetRequest
 	if err := json.Unmarshal(ctx.PostBody(), &req); err != nil {
+		logger.Error("SET invalid JSON", "error", err.Error())
 		ctx.Error("Invalid JSON", fasthttp.StatusBadRequest)
 		return
 	}
 
+	logger.Info("SET request", "key", req.Key, "size", len(req.Value))
+
 	if err := s.service.HandleSet(req.Key, req.Value); err != nil {
+		logger.Error("SET failed", "key", req.Key, "error", err.Error())
 		ctx.Error(err.Error(), fasthttp.StatusInternalServerError)
 		return
 	}
 
+	logger.Info("SET success", "key", req.Key)
 	ctx.SetBodyString("OK")
 }
 

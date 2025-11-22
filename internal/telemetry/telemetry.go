@@ -3,7 +3,7 @@ package telemetry
 import (
 	"context"
 	"fmt"
-	"log"
+	stdlog "log"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/log"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -24,7 +25,7 @@ import (
 // If endpoint is empty, it returns a no-op shutdown function.
 func Init(serviceName, serviceVersion, endpoint, nodeURL string) (func(context.Context) error, error) {
 	if endpoint == "" {
-		log.Println("⚠️  OTel endpoint not configured, telemetry disabled")
+		stdlog.Println("⚠️  OTel endpoint not configured, telemetry disabled")
 		return func(context.Context) error { return nil }, nil
 	}
 
@@ -81,9 +82,9 @@ func Init(serviceName, serviceVersion, endpoint, nodeURL string) (func(context.C
 	)
 
 	// Create LoggerProvider
-	lp := sdklog.NewLoggerProvider(
-		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExporter)),
-		sdklog.WithResource(res),
+	lp := log.NewLoggerProvider(
+		log.WithProcessor(log.NewBatchProcessor(logExporter)),
+		log.WithResource(res),
 	)
 
 	// Set globals
@@ -95,11 +96,14 @@ func Init(serviceName, serviceVersion, endpoint, nodeURL string) (func(context.C
 		propagation.Baggage{},
 	))
 
-	log.Printf("✅ OpenTelemetry initialized -> %s", endpoint)
+	stdlog.Printf("✅ OpenTelemetry initialized -> %s", endpoint)
 
 	return func(ctx context.Context) error {
 		var errs []error
 		if err := tp.Shutdown(ctx); err != nil {
+			errs = append(errs, err)
+		}
+		if err := mp.Shutdown(ctx); err != nil {
 			errs = append(errs, err)
 		}
 		if err := mp.Shutdown(ctx); err != nil {
