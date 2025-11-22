@@ -353,6 +353,13 @@ pct exec $CTID -- bash -c "
 export GRAFANA_OTLP_ENDPOINT='$GRAFANA_OTLP_ENDPOINT'
 export GRAFANA_CLOUD_USERNAME='$GRAFANA_CLOUD_USERNAME' 
 export GRAFANA_CLOUD_PASSWORD='$GRAFANA_CLOUD_PASSWORD'
+
+    # Get container IP for node URL first
+    CONTAINER_IP=\$(ip route get 1 2>/dev/null | awk '{print \$7}' | head -1)
+    if [ -z \"\$CONTAINER_IP\" ]; then
+        CONTAINER_IP=\"localhost\"
+    fi
+
     # Update and install dependencies
     apt-get update &>/dev/null
     apt-get install -y curl ca-certificates wget tar &>/dev/null
@@ -371,12 +378,6 @@ export GRAFANA_CLOUD_PASSWORD='$GRAFANA_CLOUD_PASSWORD'
     # Download OTEL Collector Contrib (includes all components)
     wget -qO /tmp/otelcol.tar.gz \"https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.114.0/otelcol-contrib_0.114.0_linux_amd64.tar.gz\" &
     OTEL_PID=\$!
-    
-    # Get container IP for node URL
-    CONTAINER_IP=\$(ip route get 1 2>/dev/null | awk '{print \$7}' | head -1)
-    if [ -z \"\$CONTAINER_IP\" ]; then
-        CONTAINER_IP=\"localhost\"
-    fi
     
     # Create OTEL Collector directories and config
     mkdir -p /etc/otelcol /var/log/otelcol
