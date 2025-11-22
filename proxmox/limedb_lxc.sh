@@ -498,8 +498,7 @@ processors:
         action: upsert
       - key: host.name
         value: \"http://\${CONTAINER_IP}:8484\"
-        action: insert
-        action: insert
+        action: upsert
       - key: node.url
         value: \"http://\${CONTAINER_IP}:8484\"
         action: upsert
@@ -611,7 +610,7 @@ Environment=OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 Environment=OTEL_SERVICE_NAME=limedb
 Environment=OTEL_SERVICE_VERSION=\${LATEST_VERSION}
 Environment=OTEL_ENVIRONMENT=production
-ExecStart=/usr/local/bin/limedb -server.port 8484 -node.url \"http://\${CONTAINER_IP}:8484\"$(if [ -n \"\$CLUSTER_PEERS\" ]; then echo \" -node.peers \\\"\$CLUSTER_PEERS\\\"\"; fi)
+ExecStart=/usr/local/bin/limedb -server.port 8484 -node.url \"http://\${CONTAINER_IP}:8484\"\$([ -n \"\$CLUSTER_PEERS\" ] && echo \" -node.peers \\\"\$CLUSTER_PEERS\\\"\")
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
