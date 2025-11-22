@@ -154,6 +154,8 @@ func (s *Server) router(ctx *fasthttp.RequestCtx) {
 		s.handleClusterState(ctx)
 	case method == "GET" && path == "/api/v1/cluster/ring":
 		s.handleRingState(ctx)
+	case method == "GET" && path == "/api/v1/cluster/gossip":
+		s.handleGossipMetrics(ctx)
 	case method == "GET" && path == "/api/v1/health":
 		s.handleHealth(ctx)
 	case method == "POST" && path == "/gossip":
@@ -277,6 +279,18 @@ func (s *Server) handleGossip(ctx *fasthttp.RequestCtx) {
 	// Pass the payload (which is the GossipMessage) to the gossiper
 	resp := s.gossiper.HandleGossip(msg.Payload)
 	body, _ := json.Marshal(resp)
+	ctx.SetContentType("application/json")
+	ctx.SetBody(body)
+}
+
+func (s *Server) handleGossipMetrics(ctx *fasthttp.RequestCtx) {
+	if s.gossiper == nil {
+		ctx.Error("Gossip service unavailable", fasthttp.StatusServiceUnavailable)
+		return
+	}
+
+	metrics := s.gossiper.GetGossipMetrics()
+	body, _ := json.Marshal(metrics)
 	ctx.SetContentType("application/json")
 	ctx.SetBody(body)
 }

@@ -111,7 +111,7 @@ func (g *Gossiper) HandleGossip(requestBody []byte) map[string]interface{} {
 	}
 }
 func (g *Gossiper) StartGossiping() {
-	gossipTicker := time.NewTicker(30 * time.Second)
+	gossipTicker := time.NewTicker(15 * time.Second)
 	summaryTicker := time.NewTicker(60 * time.Second)
 
 	go func() {
@@ -430,7 +430,7 @@ func (g *Gossiper) handleSyn(payload SynPayload) AckPayload {
 		}
 
 		localHeartbeat, exists := g.peerHeartbeats[digest.NodeURL]
-		
+
 		// Add new peer if not already known
 		if !exists {
 			g.peers = append(g.peers, digest.NodeURL)
@@ -440,7 +440,7 @@ func (g *Gossiper) handleSyn(payload SynPayload) AckPayload {
 				"total_peers", len(g.peers),
 			)
 		}
-		
+
 		if !exists || digest.Heartbeat > localHeartbeat {
 			// Update our record if the received heartbeat is newer
 			oldHeartbeat := g.peerHeartbeats[digest.NodeURL]

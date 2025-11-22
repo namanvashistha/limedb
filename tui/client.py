@@ -44,6 +44,19 @@ class ClusterClient:
         except Exception as e:
             return {"error": repr(e)}
 
+    async def get_gossip_metrics(self, base_url: Optional[str] = None) -> Dict[str, Any]:
+        if base_url is None:
+            base_url = self.get_random_url()
+        url = f"{base_url}/api/v1/cluster/gossip"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=2) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    return {"error": f"Status {response.status}"}
+        except Exception as e:
+            return {"error": repr(e)}
+
     async def set_key(
         self, key: str, value: str, base_url: Optional[str] = None
     ) -> Dict[str, Any]:

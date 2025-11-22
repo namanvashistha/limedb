@@ -13,6 +13,7 @@ from textual.widgets import (
 )
 from textual.containers import Container, Horizontal, Grid
 from client import ClusterClient
+from textual import log
 import asyncio
 import statistics
 import sys
@@ -56,6 +57,111 @@ class CyclicDataTable(DataTable):
             super().action_cursor_up()
 
 
+class GossipDetails(Static):
+    """A widget to display detailed gossip protocol information."""
+
+    def compose(self) -> ComposeResult:
+        yield Label("GOSSIP PROTOCOL DETAILS", classes="section-title")
+        yield Container(
+            Label("Select a node from the cluster table to view gossip details", id="gossip_info"),
+            CyclicDataTable(id="gossip_peers_table"),
+            classes="gossip-container"
+        )
+
+    def on_mount(self) -> None:
+        table = self.query_one("#gossip_peers_table")
+        table.add_columns("PEER URL", "HEARTBEAT", "LAG", "STATUS")
+        table.cursor_type = "row"
+        table.show_header = True
+
+    def update_gossip_details(self, node_url: str, gossip_data: dict) -> None:
+        info_label = self.query_one("#gossip_info")
+        table = self.query_one("#gossip_peers_table")
+        table.clear()
+
+        if "error" in gossip_data or not gossip_data:
+            info_label.update(f"[red]No gossip data available for {node_url}[/]")
+            return
+
+        # Check if standalone
+        status = gossip_data.get("status", "")
+        if status == "standalone":
+            info_label.update(
+                f"[bold white]{node_url}[/] - [blue]STANDALONE MODE[/]\n"
+                f"[dim]Node running independently with no cluster peers[/]\n"
+                f"[dim]Heartbeat:[/] {gossip_data.get('node_heartbeat', 0)}"
+            )
+            return
+
+        # Display gossip summary
+        cluster_health = gossip_data.get("cluster_health", "unknown")
+        node_heartbeat = gossip_data.get("node_heartbeat", 0)
+        total_peers = gossip_data.get("total_peers", 0)
+        active_peers = gossip_data.get("active_peers", 0)
+        dead_peers = gossip_data.get("dead_peers", 0)
+        stale_peers = gossip_data.get("stale_peers", 0)
+        convergence_rate = gossip_data.get("convergence_rate", 0)
+        avg_lag = gossip_data.get("average_lag", 0)
+        max_lag = gossip_data.get("max_lag", 0)
+
+        # Health color coding
+        if cluster_health == "healthy":
+            health_colored = f"[green]✓ {cluster_health.upper()}[/]"
+        elif cluster_health == "degraded":
+            health_colored = f"[yellow]⚠ {cluster_health.upper()}[/]"
+        elif cluster_health == "critical":
+            health_colored = f"[red]✗ {cluster_health.upper()}[/]"
+        else:
+            health_colored = f"[dim]{cluster_health.upper()}[/]"
+
+        info_text = (
+            f"[bold white]{node_url}[/] - {health_colored}\n"
+            f"[dim]Heartbeat:[/] {node_heartbeat} | "
+            f"[dim]Peers:[/] {active_peers}/{total_peers} active | "
+            f"[dim]Convergence:[/] {convergence_rate:.1f}%\n"
+            f"[dim]Lag:[/] Avg {avg_lag:.1f} | Max {max_lag} | "
+            f"[dim]Dead:[/] {dead_peers} | [dim]Stale:[/] {stale_peers}"
+        )
+        info_label.update(info_text)
+
+        # Show peer details
+        peer_details = gossip_data.get("peer_details", [])
+        if not peer_details:
+            table.add_row("[dim]No peer data available[/]", "-", "-", "-")
+            return
+            
+        for peer in peer_details:
+            url = peer.get("url", "unknown")
+            heartbeat = peer.get("heartbeat", 0)
+            lag = peer.get("lag", 0)
+            status = peer.get("status", "unknown")
+
+            # Status color coding
+            if status == "active":
+                status_colored = f"[green]● {status.upper()}[/]"
+            elif status == "stale":
+                status_colored = f"[yellow]● {status.upper()}[/]"
+            elif status == "dead":
+                status_colored = f"[red]● {status.upper()}[/]"
+            else:
+                status_colored = f"[dim]● {status.upper()}[/]"
+
+            # Lag color coding
+            if lag == 0:
+                lag_colored = f"[green]{lag}[/]"
+            elif lag <= 5:
+                lag_colored = f"[yellow]{lag}[/]"
+            else:
+                lag_colored = f"[red]{lag}[/]"
+
+            table.add_row(
+                f"[bold white]{url}[/]",
+                str(heartbeat),
+                lag_colored,
+                status_colored
+            )
+
+
 class ClusterStatus(Static):
     """A widget to display the status and metrics of all nodes."""
 
@@ -66,13 +172,13 @@ class ClusterStatus(Static):
     def on_mount(self) -> None:
         table = self.query_one(CyclicDataTable)
         table.add_columns(
-            "STATUS", "NODE URL", "PORT", "PEERS", "CPU", "MEM", "UPTIME", "LATENCY"
+            "STATUS", "NODE URL", "PORT", "PEERS", "GOSSIP", "CPU", "MEM", "UPTIME", "LATENCY"
         )
         table.cursor_type = "row"
         table.zebra_stripes = False
         table.show_header = True
 
-    def update_status(self, status_data: dict, metrics_data: dict) -> None:
+    def update_status(self, status_data: dict, metrics_data: dict, gossip_data: dict) -> None:
         table = self.query_one(CyclicDataTable)
         # Save cursor position
         cursor_row = table.cursor_row
@@ -83,6 +189,7 @@ class ClusterStatus(Static):
         for url in sorted_urls:
             data = status_data[url]
             metrics = metrics_data.get(url, {})
+            gossip = gossip_data.get(url, {})
 
             # Status Icon
             if "error" in data:
@@ -104,6 +211,23 @@ class ClusterStatus(Static):
                 port = url.split(":")[-1]
             except:
                 port = "?"
+
+            # Gossip Status
+            if 0 and "error" in gossip or not gossip:
+                gossip_status = "-"
+            else:
+                cluster_health = gossip.get("cluster_health", "unknown")
+                active_peers = gossip.get("active_peers", 0)
+                total_peers = gossip.get("total_peers", 0)
+                
+                if cluster_health == "healthy":
+                    gossip_status = f"[green]✓ {active_peers}/{total_peers}[/]"
+                elif cluster_health == "degraded":
+                    gossip_status = f"[yellow]⚠ {active_peers}/{total_peers}[/]"
+                elif cluster_health == "critical":
+                    gossip_status = f"[red]✗ {active_peers}/{total_peers}[/]"
+                else:
+                    gossip_status = f"[dim]? {active_peers}/{total_peers}[/]"
 
             # Metrics
             if "error" in metrics or not metrics:
@@ -132,15 +256,62 @@ class ClusterStatus(Static):
                 f"[bold white]{node_url}[/]",
                 str(port),
                 peers_count,
+                gossip_status,
                 cpu,
                 mem,
                 uptime,
                 latency,
             )
 
-        # Restore cursor if possible
+        # Store gossip data for selection events
+        self.gossip_data = gossip_data
+        self.sorted_urls = sorted_urls
+        
+        # Restore cursor if possible, otherwise select first row
         if cursor_row < table.row_count:
             table.move_cursor(row=cursor_row)
+        elif table.row_count > 0:
+            table.move_cursor(row=0)
+            
+        # Auto-update gossip details for the selected row
+        if table.row_count > 0:
+            current_row = table.cursor_row
+            if current_row < len(sorted_urls):
+                selected_url = sorted_urls[current_row]
+                selected_gossip = gossip_data.get(selected_url, {})
+                try:
+                    gossip_widget = self.app.query_one(GossipDetails)
+                    gossip_widget.update_gossip_details(selected_url, selected_gossip)
+                except Exception as e:
+                    log(f"Error auto-updating gossip details: {e}")
+
+    def on_data_table_row_selected(self, event) -> None:
+        """Handle row selection to show gossip details."""
+        if hasattr(self, 'gossip_data') and hasattr(self, 'sorted_urls'):
+            if event.cursor_row < len(self.sorted_urls):
+                selected_url = self.sorted_urls[event.cursor_row]
+                gossip_data = self.gossip_data.get(selected_url, {})
+                
+                # Update gossip details widget
+                try:
+                    gossip_widget = self.app.query_one(GossipDetails)
+                    gossip_widget.update_gossip_details(selected_url, gossip_data)
+                except Exception as e:
+                    log(f"Error updating gossip details: {e}")
+
+    def on_data_table_row_highlighted(self, event) -> None:
+        """Handle row highlighting to show gossip details immediately."""
+        if hasattr(self, 'gossip_data') and hasattr(self, 'sorted_urls'):
+            if event.cursor_row < len(self.sorted_urls):
+                selected_url = self.sorted_urls[event.cursor_row]
+                gossip_data = self.gossip_data.get(selected_url, {})
+                
+                # Update gossip details widget
+                try:
+                    gossip_widget = self.app.query_one(GossipDetails)
+                    gossip_widget.update_gossip_details(selected_url, gossip_data)
+                except Exception as e:
+                    log(f"Error updating gossip details: {e}")
 
 
 class RingSegment(Static):
@@ -332,16 +503,27 @@ class LimeDB(App):
     /* Layout Containers */
     #main_grid {
         layout: grid;
-        grid-size: 2;
-        grid-columns: 1fr 1fr;
+        grid-size: 3;
+        grid-columns: 1fr 1fr 1fr;
         grid-gutter: 1;
         padding: 1;
     }
     
-    #status_container, #ring_container {
+    #status_container, #ring_container, #gossip_container {
         height: 100%;
         border: solid #3f6212;
         background: #1a1a1a;
+    }
+    
+    .gossip-container {
+        padding: 1;
+    }
+    
+    #gossip_info {
+        margin-bottom: 1;
+        padding: 1;
+        background: #262626;
+        border: solid #3f6212;
     }
     
     /* Ring Bar */
@@ -433,6 +615,7 @@ class LimeDB(App):
                 yield Grid(
                     Container(ClusterStatus(), id="status_container"),
                     Container(RingVisualizer(), id="ring_container"),
+                    Container(GossipDetails(), id="gossip_container"),
                     id="main_grid",
                 )
             with TabPane("Data Explorer", id="tab_explorer"):
@@ -454,24 +637,29 @@ class LimeDB(App):
                 ring_data = await self.client.get_ring_state(url)
                 break
 
-        # Metrics Data (Parallel Fetch)
+        # Fetch Metrics and Gossip Data (Parallel)
         metrics_data = {}
+        gossip_data = {}
         tasks = []
         urls = sorted(status_data.keys())
 
         for url in urls:
             if "error" not in status_data[url]:
                 tasks.append(self.fetch_node_metrics(url))
+                tasks.append(self.client.get_gossip_metrics(url))
             else:
                 metrics_data[url] = {"error": "Node Down"}
+                gossip_data[url] = {"error": "Node Down"}
 
         results = await asyncio.gather(*tasks)
         active_urls = [u for u in urls if "error" not in status_data[u]]
 
-        for url, metrics in zip(active_urls, results):
-            metrics_data[url] = metrics
+        # Split results between metrics and gossip (alternating in tasks list)
+        for i, url in enumerate(active_urls):
+            metrics_data[url] = results[i * 2]      # metrics
+            gossip_data[url] = results[i * 2 + 1]   # gossip
 
-        self.query_one(ClusterStatus).update_status(status_data, metrics_data)
+        self.query_one(ClusterStatus).update_status(status_data, metrics_data, gossip_data)
         self.query_one(RingVisualizer).update_ring(ring_data)
 
     async def fetch_node_metrics(self, base_url: str) -> dict:
@@ -513,11 +701,11 @@ if __name__ == "__main__":
         host_urls = [url.strip() for url in args.hosts.split(",") if url.strip()]
 
         if not host_urls:
-            print("Error: No valid host URLs provided after parsing")
-            print("Please provide valid URLs separated by commas")
+            log("Error: No valid host URLs provided after parsing")
+            log("Please provide valid URLs separated by commas")
             sys.exit(1)
 
-        print(f"Connecting to LimeDB cluster hosts: {', '.join(host_urls)}")
+        log(f"Connecting to LimeDB cluster hosts: {', '.join(host_urls)}")
 
         app = LimeDB(host_urls=host_urls)
         app.run()
@@ -525,11 +713,11 @@ if __name__ == "__main__":
     except SystemExit as e:
         # This catches argparse exits (like --help or missing required args)
         if e.code != 0:
-            print("\nUsage: python main.py --hosts <comma-separated-urls>")
-            print(
+            log("\nUsage: python main.py --hosts <comma-separated-urls>")
+            log(
                 "Example: python main.py --hosts http://192.168.1.125:8484,http://192.168.1.126:8484"
             )
         sys.exit(e.code)
     except Exception as e:
-        print(f"Error: {e}")
+        log(f"Error: {e}")
         sys.exit(1)
