@@ -347,17 +347,33 @@ echo -e "${DGN}━━━━━━━━━━━━━━━━━━━━━�
 # For multi-node clusters, edit the systemd service file after installation
 
 # Install dependencies, LimeDB, and OTEL Collector (optimized single operation)
+# Get container IP before entering container execution
+CONTAINER_IP=""
+if [[ -n "$NETWORK_PREFIX" ]]; then
+    CONTAINER_IP="${NETWORK_PREFIX}.${CTID}"
+else
+    # Try to get IP from container if it's available
+    CONTAINER_IP=$(pct exec $CTID -- ip route get 1 2>/dev/null | awk '{print $7}' | head -1 2>/dev/null || echo "localhost")
+fi
+
+if [[ -z "$CONTAINER_IP" || "$CONTAINER_IP" == "localhost" ]]; then
+    CONTAINER_IP="localhost"
+fi
+
 echo -ne " ${YW}Installing LimeDB + OTEL Collector (all steps)...${CL}"
 pct exec $CTID -- bash -c "
 # Set environment variables from host
 export GRAFANA_OTLP_ENDPOINT='$GRAFANA_OTLP_ENDPOINT'
 export GRAFANA_CLOUD_USERNAME='$GRAFANA_CLOUD_USERNAME' 
 export GRAFANA_CLOUD_PASSWORD='$GRAFANA_CLOUD_PASSWORD'
+export CONTAINER_IP='$CONTAINER_IP'
 
-    # Get container IP for node URL first
-    CONTAINER_IP=\$(ip route get 1 2>/dev/null | awk '{print \$7}' | head -1)
+    # Use the container IP passed from host
     if [ -z \"\$CONTAINER_IP\" ]; then
-        CONTAINER_IP=\"localhost\"
+        CONTAINER_IP=\$(ip route get 1 2>/dev/null | awk '{print \$7}' | head -1)
+        if [ -z \"\$CONTAINER_IP\" ]; then
+            CONTAINER_IP=\"localhost\"
+        fi
     fi
 
     # Update and install dependencies
@@ -572,7 +588,7 @@ Environment=OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 Environment=OTEL_SERVICE_NAME=limedb
 Environment=OTEL_SERVICE_VERSION=\$LATEST_VERSION
 Environment=OTEL_ENVIRONMENT=production
-ExecStart=/usr/local/bin/limedb -server.port 8484 -node.url \"http://${CONTAINER_IP}:8484\" -node.peers \"http://${CONTAINER_IP}:8484\"
+ExecStart=/usr/local/bin/limedb -server.port 8484 -node.url \"http://\$CONTAINER_IP:8484\" -node.peers \"http://\$CONTAINER_IP:8484\"
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
