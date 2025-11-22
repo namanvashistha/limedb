@@ -391,6 +391,54 @@ receivers:
       http:
         endpoint: 0.0.0.0:4318
 
+  # System resource metrics
+  hostmetrics:
+    collection_interval: 10s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+          system.cpu.time:
+            enabled: true
+      memory:
+        metrics:
+          system.memory.usage:
+            enabled: true
+          system.memory.utilization:
+            enabled: true
+      disk:
+        metrics:
+          system.disk.io:
+            enabled: true
+          system.disk.operations:
+            enabled: true
+          system.disk.io_time:
+            enabled: true
+      filesystem:
+        metrics:
+          system.filesystem.usage:
+            enabled: true
+          system.filesystem.utilization:
+            enabled: true
+      network:
+        metrics:
+          system.network.io:
+            enabled: true
+          system.network.packets:
+            enabled: true
+          system.network.errors:
+            enabled: true
+      process:
+        metrics:
+          process.cpu.utilization:
+            enabled: true
+          process.memory.usage:
+            enabled: true
+        mute_process_name_error: true
+        mute_process_exe_error: true
+        mute_process_io_error: true
+
 processors:
   batch:
     timeout: 1s
@@ -436,7 +484,7 @@ service:
       processors: [resource, batch]
       exporters: [otlphttp/grafana_cloud]
     metrics:
-      receivers: [otlp]
+      receivers: [otlp, hostmetrics]
       processors: [resource, batch]
       exporters: [otlphttp/grafana_cloud]
     logs:
