@@ -3,7 +3,7 @@ import { GossipMetrics, KeyValueResponse, NodeStatus, RingState } from "./types"
 const BASE_URL = "/api/proxy";
 
 export const api = {
-  async getClusterStatus(): Promise<Record<string, NodeStatus>> {
+  async getClusterStatus(): Promise<NodeStatus> {
     const res = await fetch(`${BASE_URL}/cluster/state`);
     if (!res.ok) throw new Error("Failed to fetch cluster status");
     return res.json();

@@ -12,23 +12,26 @@ import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function Dashboard() {
-  const [nodes, setNodes] = useState<Record<string, NodeStatus>>({});
-  const [ring, setRing] = useState<RingState>({ ranges: {}, version: 0 });
+  const [node, setNode] = useState<NodeStatus | null>(null);
+  const [ring, setRing] = useState<RingState>({ ranges: {} });
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const [nodesData, ringData] = await Promise.all([
+      const [nodeData, ringData] = await Promise.all([
         api.getClusterStatus(),
         api.getRingState(),
       ]);
-      setNodes(nodesData);
+      setNode(nodeData);
       setRing(ringData);
       setLastUpdated(new Date());
-    } catch (error) {
-      console.error("Failed to fetch data:", error);
+    } catch (err) {
+      console.error("Failed to fetch data:", err);
+      setError(err instanceof Error ? err.message : "Failed to connect to cluster");
     } finally {
       setLoading(false);
     }
@@ -41,14 +44,13 @@ export default function Dashboard() {
   }, []);
 
   // Calculate summary stats
-  const activeNodes = Object.values(nodes).filter(
-    (n) => n.status === "active"
-  ).length;
-  const totalNodes = Object.keys(nodes).length;
+  const activeNodes = node?.status === "active" ? 1 : 0;
+  const totalNodes = node ? 1 + (node.peers?.length || 0) : 0;
   
-  let health = "healthy";
-  if (activeNodes === 0) health = "critical";
-  else if (activeNodes < totalNodes) health = "degraded";
+  let health = "unknown";
+  if (node) {
+    health = node.status === "active" ? "healthy" : "critical";
+  }
 
   let totalKeys = 0;
   if (ring.ranges) {
@@ -78,6 +80,13 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* Error Message */}
+        {error && (
+          <div className="rounded-md border border-red-500 bg-red-500/10 p-4 text-red-500">
+            {error}
+          </div>
+        )}
+
         {/* Summary */}
         <SummaryCards
           health={health}
@@ -95,7 +104,7 @@ export default function Dashboard() {
           <TabsContent value="overview" className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
               <div className="col-span-4">
-                <ClusterStatusTable nodes={nodes} />
+                <ClusterStatusTable node={node} />
               </div>
               <div className="col-span-3">
                 <RingVisualizer ring={ring} />

@@ -2,7 +2,7 @@ export interface NodeStatus {
   nodeUrl: string;
   status: "active" | "dead" | "unknown";
   peers: string[];
-  timestamp: number;
+  totalNodes: number;
 }
 
 export interface GossipMetrics {
@@ -35,7 +35,9 @@ export interface RingRange {
 
 export interface RingState {
   ranges: Record<string, RingRange[]>;
-  version: number;
+  version?: number;
+  currentNode?: string;
+  allNodes?: string[];
 }
 
 export interface KeyValueResponse {
