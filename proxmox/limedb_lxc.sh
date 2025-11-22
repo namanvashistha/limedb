@@ -449,19 +449,13 @@ processors:
         value: limedb-node
         action: upsert
       - key: service.version
-        value: v0.0.6
+        value: \$LATEST_VERSION
         action: upsert
       - key: deployment.environment
         value: production
         action: upsert
       - key: host.name
         from_attribute: host.name
-        action: upsert
-      - key: node.url
-        value: \"http://\$CONTAINER_IP:8484\"
-        action: upsert
-      - key: limedb.node.url
-        value: \"http://\$CONTAINER_IP:8484\"
         action: upsert
 
 exporters:
@@ -566,7 +560,7 @@ User=root
 Environment=OTEL_ENABLED=true
 Environment=OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 Environment=OTEL_SERVICE_NAME=limedb
-Environment=OTEL_SERVICE_VERSION=v0.0.6
+Environment=OTEL_SERVICE_VERSION=\$LATEST_VERSION
 Environment=OTEL_ENVIRONMENT=production
 ExecStart=/usr/local/bin/limedb -server.port 8484 -node.url \"http://\$CONTAINER_IP:8484\" -node.peers \"http://\$CONTAINER_IP:8484\"
 Restart=on-failure
