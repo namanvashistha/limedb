@@ -392,7 +392,7 @@ export CONTAINER_IP='$CONTAINER_IP'
     LIMEDB_PID=\$!
     
     # Download OTEL Collector Contrib (includes all components)
-    wget -qO /tmp/otelcol.tar.gz \"https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.114.0/otelcol-contrib_0.114.0_linux_amd64.tar.gz\" &
+    wget -qO /tmp/otelcol.tar.gz \"https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.140.0/otelcol-contrib_0.140.0_linux_amd64.tar.gz\" &
     OTEL_PID=\$!
     
     # Create OTEL Collector directories and config
@@ -478,10 +478,7 @@ processors:
         value: production
         action: upsert
       - key: host.name
-        value: limedbhost
-        action: upsert
-      - key: host.ip
-        value: \"\${CONTAINER_IP}\"
+        value: limedb
         action: upsert
       - key: node.url
         value: \"http://\${CONTAINER_IP}:8484\"
