@@ -477,8 +477,8 @@ processors:
       - key: deployment.environment
         value: production
         action: upsert
-      - key: host
-        value: \"http://\${CONTAINER_IP}:8484\"
+      - key: host.name
+        value: \"\${CONTAINER_IP}\"
         action: upsert
       - key: node.url
         value: \"http://\${CONTAINER_IP}:8484\"
