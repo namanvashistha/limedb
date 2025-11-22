@@ -367,6 +367,7 @@ export GRAFANA_OTLP_ENDPOINT='$GRAFANA_OTLP_ENDPOINT'
 export GRAFANA_CLOUD_USERNAME='$GRAFANA_CLOUD_USERNAME' 
 export GRAFANA_CLOUD_PASSWORD='$GRAFANA_CLOUD_PASSWORD'
 export CONTAINER_IP='$CONTAINER_IP'
+export CTID='$CTID'
 
     # Use the container IP passed from host
     if [ -z \"\$CONTAINER_IP\" ]; then
@@ -460,6 +461,9 @@ processors:
   batch:
     timeout: 1s
     send_batch_size: 512
+  resourcedetection:
+    detectors: [env, system]
+    override: false
   resource:
     attributes:
       - key: service.name
@@ -478,8 +482,11 @@ processors:
         value: production
         action: upsert
       - key: host.name
-        value: limedb
-        action: upsert
+        value: \"limedb-\${CONTAINER_IP}\"
+        action: insert
+      - key: host.id
+        value: \"limedb-\${CTID}\"
+        action: insert
       - key: node.url
         value: \"http://\${CONTAINER_IP}:8484\"
         action: upsert
@@ -504,15 +511,15 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [resource, batch]
+      processors: [resourcedetection, resource, batch]
       exporters: [otlphttp/grafana_cloud]
     metrics:
       receivers: [otlp, hostmetrics]
-      processors: [resource, batch]
+      processors: [resourcedetection, resource, batch]
       exporters: [otlphttp/grafana_cloud]
     logs:
       receivers: [otlp]
-      processors: [resource, batch]
+      processors: [resourcedetection, resource, batch]
       exporters: [otlphttp/grafana_cloud]
 OTELCONF
 
