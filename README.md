@@ -476,3 +476,4 @@ LimeDB draws inspiration from:
 - https://www.julianbrowne.com/
 - https://www.toptal.com/big-data/consistent-hashing
 - https://www.digitalocean.com/community/tutorials/understanding-database-sharding
+- https://docs.scylladb.com/manual/master/kb/gossip.html

@@ -3,7 +3,7 @@ package node
 import (
 	"encoding/json"
 	"fmt"
-	"limedb-go/internal/ring"
+	"limedb/internal/ring"
 	"time"
 
 	"github.com/valyala/fasthttp"
@@ -30,9 +30,9 @@ type NodeService struct {
 }
 
 // New creates a new NodeService.
-func New(nodeUrl string, virtualNodes int, peers []string) *NodeService {
+func NewService(nodeUrl string, virtualNodes int, peers []string) *NodeService {
 	currentNodeUrl := nodeUrl
-	
+
 	r := ring.New(virtualNodes)
 	for _, peer := range peers {
 		r.AddNode(peer)
@@ -101,7 +101,7 @@ func (s *NodeService) HandleDelete(key string) (bool, error) {
 // forwardGet forwards a GET request to a peer.
 func (s *NodeService) forwardGet(targetUrl, key string) (*GetResponse, error) {
 	url := fmt.Sprintf("%s/api/v1/get/%s", targetUrl, key)
-	
+
 	req := fasthttp.AcquireRequest()
 	resp := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseRequest(req)
@@ -128,7 +128,7 @@ func (s *NodeService) forwardGet(targetUrl, key string) (*GetResponse, error) {
 // forwardSet forwards a SET request to a peer.
 func (s *NodeService) forwardSet(targetUrl, key, value string) error {
 	url := fmt.Sprintf("%s/api/v1/set", targetUrl)
-	
+
 	req := fasthttp.AcquireRequest()
 	resp := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseRequest(req)
@@ -137,7 +137,7 @@ func (s *NodeService) forwardSet(targetUrl, key, value string) error {
 	req.SetRequestURI(url)
 	req.Header.SetMethod(fasthttp.MethodPost)
 	req.Header.SetContentType("application/json")
-	
+
 	body := SetRequest{Key: key, Value: value}
 	bodyBytes, _ := json.Marshal(body)
 	req.SetBody(bodyBytes)
@@ -155,7 +155,7 @@ func (s *NodeService) forwardSet(targetUrl, key, value string) error {
 // forwardDelete forwards a DELETE request to a peer.
 func (s *NodeService) forwardDelete(targetUrl, key string) (bool, error) {
 	url := fmt.Sprintf("%s/api/v1/del/%s", targetUrl, key)
-	
+
 	req := fasthttp.AcquireRequest()
 	resp := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseRequest(req)
@@ -171,7 +171,7 @@ func (s *NodeService) forwardDelete(targetUrl, key string) (bool, error) {
 	if resp.StatusCode() != fasthttp.StatusOK {
 		return false, fmt.Errorf("peer returned status %d", resp.StatusCode())
 	}
-	
+
 	// Assuming peer returns "1" for true, "0" for false like Java implementation
 	return string(resp.Body()) == "1", nil
 }

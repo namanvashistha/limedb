@@ -3,15 +3,19 @@ package main
 import (
 	"context"
 	"fmt"
-	"limedb-go/internal/config"
-	"limedb-go/internal/logger"
-	"limedb-go/internal/node"
-	"limedb-go/internal/server"
-	"limedb-go/internal/telemetry"
+	"limedb/internal/config"
+	"limedb/internal/gossiper"
+	"limedb/internal/logger"
+	"limedb/internal/messenger"
+	"limedb/internal/node"
+	"limedb/internal/server"
+	"limedb/internal/telemetry"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/valyala/fasthttp"
 )
 
 func main() {
@@ -56,15 +60,23 @@ func main() {
 
 	// Initialize Node Service
 	logger.Info("🔧 Initializing node service")
-	svc := node.New(
+	svc := node.NewService(
 		cfg.NodeUrl,
 		cfg.VirtualNodes,
 		cfg.Peers,
 	)
 
+	// Initialize Gossiper (only if we have peers)
+	logger.Info("🗣️  Initializing gossip protocol")
+	httpClient := &fasthttp.Client{}
+	sender := messenger.NewFasthttpMessengeSender(httpClient)
+	msngr := messenger.NewMessenger(sender)
+	g := gossiper.NewGossiper(cfg.NodeUrl, cfg.Peers, msngr)
+	g.StartGossiping()
+
 	// Initialize HTTP Server
 	logger.Info("🌐 Initializing HTTP server")
-	srv := server.New(svc, cfg.ServerPort)
+	srv := server.NewServer(svc, g, cfg.ServerPort)
 
 	// Start Server in a goroutine
 	serverStarted := make(chan bool, 1)

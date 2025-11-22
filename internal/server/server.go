@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"limedb-go/internal/logger"
-	"limedb-go/internal/node"
+	"limedb/internal/gossiper"
+	"limedb/internal/logger"
+	"limedb/internal/node"
 	"time"
 
 	"github.com/valyala/fasthttp"
@@ -18,6 +19,7 @@ import (
 // Server represents the HTTP server.
 type Server struct {
 	service    *node.NodeService
+	gossiper   *gossiper.Gossiper
 	port       int
 	httpServer *fasthttp.Server
 	tracer     trace.Tracer
@@ -26,8 +28,8 @@ type Server struct {
 	reqLatency metric.Float64Histogram
 }
 
-// New creates a new HTTP server.
-func New(service *node.NodeService, port int) *Server {
+// NewServer creates a new HTTP server.
+func NewServer(service *node.NodeService, gossiper *gossiper.Gossiper, port int) *Server {
 	meter := otel.Meter("limedb-node")
 
 	reqCounter, _ := meter.Int64Counter(
@@ -52,6 +54,7 @@ func New(service *node.NodeService, port int) *Server {
 		meter:      meter,
 		reqCounter: reqCounter,
 		reqLatency: reqLatency,
+		gossiper:   gossiper,
 	}
 }
 
@@ -152,6 +155,8 @@ func (s *Server) router(ctx *fasthttp.RequestCtx) {
 		s.handleRingState(ctx)
 	case method == "GET" && path == "/api/v1/health":
 		s.handleHealth(ctx)
+	case method == "POST" && path == "/gossip":
+		s.handleGossip(ctx)
 	default:
 		ctx.Error("Not Found", fasthttp.StatusNotFound)
 	}
@@ -162,7 +167,7 @@ func (s *Server) handleGet(ctx *fasthttp.RequestCtx, key string) {
 		"key", key,
 		"client.ip", ctx.RemoteIP().String(),
 	)
-	
+
 	resp, err := s.service.HandleGet(key)
 	if err != nil {
 		logger.Warn("GET failed", "key", key, "error", err.Error())
@@ -239,13 +244,29 @@ func (s *Server) handleRingState(ctx *fasthttp.RequestCtx) {
 func (s *Server) handleHealth(ctx *fasthttp.RequestCtx) {
 	health := map[string]interface{}{
 		"status":    "healthy",
-		"service":   "limedb-node",  
+		"service":   "limedb-node",
 		"version":   "1.0.0",
 		"nodeUrl":   s.service.GetNodeUrl(),
 		"timestamp": time.Now().Format(time.RFC3339),
 	}
 
 	body, _ := json.Marshal(health)
+	ctx.SetContentType("application/json")
+	ctx.SetBody(body)
+}
+
+func (s *Server) handleGossip(ctx *fasthttp.RequestCtx) {
+	if s.gossiper == nil {
+		logger.Error("Gossiper not initialized")
+		ctx.Error("Gossip service unavailable", fasthttp.StatusServiceUnavailable)
+		return
+	}
+
+	// Pass the request body to the gossiper
+	requestBody := ctx.PostBody()
+	resp := s.gossiper.HandleGossip(requestBody)
+	
+	body, _ := json.Marshal(resp)
 	ctx.SetContentType("application/json")
 	ctx.SetBody(body)
 }
