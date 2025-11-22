@@ -360,6 +360,20 @@ if [[ -z "$CONTAINER_IP" || "$CONTAINER_IP" == "localhost" ]]; then
     CONTAINER_IP="localhost"
 fi
 
+# Simple peer configuration
+echo ""
+echo -e "${YW}Cluster Configuration${CL}"
+read -p "Enter peer URLs (comma-separated, or press Enter for standalone): " CLUSTER_PEERS
+if [[ -n "$CLUSTER_PEERS" ]]; then
+    # Remove self from peers if present
+    CLUSTER_PEERS=$(echo "$CLUSTER_PEERS" | sed "s|http://$CONTAINER_IP:8484||g" | sed 's/,,/,/g' | sed 's/^,//;s/,$//')
+    if [[ -z "$CLUSTER_PEERS" ]]; then
+        echo -e "${WARNING} ${YW}Self-references removed. Running in standalone mode.${CL}"
+    else
+        echo -e "${CM} ${GN}Cluster peers: $CLUSTER_PEERS${CL}"
+    fi
+fi
+
 echo -ne " ${YW}Installing LimeDB + OTEL Collector (all steps)...${CL}"
 pct exec $CTID -- bash -c "
 # Set environment variables from host
@@ -368,6 +382,7 @@ export GRAFANA_CLOUD_USERNAME='$GRAFANA_CLOUD_USERNAME'
 export GRAFANA_CLOUD_PASSWORD='$GRAFANA_CLOUD_PASSWORD'
 export CONTAINER_IP='$CONTAINER_IP'
 export CTID='$CTID'
+export CLUSTER_PEERS='$CLUSTER_PEERS'
 
     # Use the container IP passed from host
     if [ -z \"\$CONTAINER_IP\" ]; then
@@ -596,7 +611,7 @@ Environment=OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 Environment=OTEL_SERVICE_NAME=limedb
 Environment=OTEL_SERVICE_VERSION=\${LATEST_VERSION}
 Environment=OTEL_ENVIRONMENT=production
-ExecStart=/usr/local/bin/limedb -server.port 8484 -node.url \"http://\${CONTAINER_IP}:8484\" -node.peers \"http://\${CONTAINER_IP}:8484\"
+ExecStart=/usr/local/bin/limedb -server.port 8484 -node.url \"http://\${CONTAINER_IP}:8484\"$(if [ -n \"\$CLUSTER_PEERS\" ]; then echo \" -node.peers \\\"\$CLUSTER_PEERS\\\"\"; fi)
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
