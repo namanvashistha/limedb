@@ -482,10 +482,8 @@ processors:
         value: production
         action: upsert
       - key: host.name
-        value: \"limedb-\${CONTAINER_IP}\"
+        value: \"http://\${CONTAINER_IP}:8484\"
         action: insert
-      - key: host.id
-        value: \"limedb-\${CTID}\"
         action: insert
       - key: node.url
         value: \"http://\${CONTAINER_IP}:8484\"
