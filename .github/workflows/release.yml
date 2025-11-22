@@ -133,18 +133,18 @@ jobs:
           - goos: linux
             goarch: amd64
             output_name: limedb-linux-amd64
-          - goos: linux
-            goarch: arm64
-            output_name: limedb-linux-arm64
-          - goos: darwin
-            goarch: amd64
-            output_name: limedb-darwin-amd64
-          - goos: darwin
-            goarch: arm64
-            output_name: limedb-darwin-arm64
-          - goos: windows
-            goarch: amd64
-            output_name: limedb-windows-amd64.exe
+          # - goos: linux
+          #   goarch: arm64
+          #   output_name: limedb-linux-arm64
+          # - goos: darwin
+          #   goarch: amd64
+          #   output_name: limedb-darwin-amd64
+          # - goos: darwin
+          #   goarch: arm64
+          #   output_name: limedb-darwin-arm64
+          # - goos: windows
+          #   goarch: amd64
+          #   output_name: limedb-windows-amd64.exe
 
     steps:
       - name: Checkout code
