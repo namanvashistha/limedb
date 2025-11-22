@@ -2,7 +2,7 @@
 
 # Configuration
 START_PORT=7001
-NUM_NODES=${NUM_NODES:-50}  # Default to 50 if not set via environment
+NUM_NODES=${NUM_NODES:-50}
 BINARY_PATH="./build/limedb"
 
 # Colors
@@ -17,18 +17,11 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Generate Peers List
-PEERS=""
-for ((i=0; i<NUM_NODES; i++)); do
-    PORT=$((START_PORT + i))
-    if [ $i -gt 0 ]; then
-        PEERS="${PEERS},"
-    fi
-    PEERS="${PEERS}http://localhost:${PORT}"
-done
+# Set the first node as the seed peer for all others
+SEED_PEER="http://localhost:${START_PORT}"
 
 echo -e "${GREEN}Starting ${NUM_NODES} nodes...${NC}"
-echo -e "Peers: ${PEERS}"
+echo -e "Seed peer: ${SEED_PEER}"
 
 # Array to keep track of PIDs
 PIDS=()
@@ -51,8 +44,17 @@ for ((i=0; i<NUM_NODES; i++)); do
     PORT=$((START_PORT + i))
     NODE_URL="http://localhost:${PORT}"
     
-    echo "Starting Node at ${NODE_URL}..."
-    $BINARY_PATH -server.port $PORT -node.url "$NODE_URL" -node.peers "$PEERS" &
+    if [ $i -eq 0 ]; then
+        # First node starts without peers (seed node)
+        echo "Starting Seed Node at ${NODE_URL}..."
+        $BINARY_PATH -server.port $PORT -node.url "$NODE_URL" &
+    else
+        # Each node connects to the previous node
+        PREV_PORT=$((START_PORT + i - 1))
+        PREV_PEER="http://localhost:${PREV_PORT}"
+        echo "Starting Node at ${NODE_URL} with peer ${PREV_PEER}..."
+        $BINARY_PATH -server.port $PORT -node.url "$NODE_URL" -node.peers "$PREV_PEER" &
+    fi
     PIDS+=($!)
 done
 

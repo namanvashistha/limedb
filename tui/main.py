@@ -629,6 +629,9 @@ class LimeDB(App):
         self.call_later(self.update_data)
 
     async def update_data(self) -> None:
+        # First, discover new hosts through gossip
+        await self.discover_cluster_hosts()
+        
         status_data = await self.client.get_all_nodes_status()
 
         ring_data = {"error": "No active nodes"}
@@ -662,6 +665,21 @@ class LimeDB(App):
         self.query_one(ClusterStatus).update_status(status_data, metrics_data, gossip_data)
         self.query_one(RingVisualizer).update_ring(ring_data)
 
+    async def discover_cluster_hosts(self) -> None:
+        """Discover all cluster hosts through gossip protocol."""
+        # Try to get gossip data from any available host
+        for url in self.client.base_urls.copy():  # Use copy to avoid modifying during iteration
+            try:
+                gossip_data = await self.client.get_gossip_metrics(url)
+                if "error" not in gossip_data:
+                    # Update discovered hosts based on gossip data
+                    self.client.update_discovered_hosts(gossip_data, url)
+                    log(f"Discovered cluster hosts: {self.client.get_all_discovered_hosts()}")
+                    break
+            except Exception as e:
+                log(f"Failed to get gossip from {url}: {e}")
+                continue
+
     async def fetch_node_metrics(self, base_url: str) -> dict:
         metrics = await self.client.get_metrics(base_url)
         latency = await self.client.measure_latency(base_url)
@@ -678,16 +696,16 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python main.py --hosts http://192.168.1.125:8484,http://192.168.1.126:8484,http://192.168.1.127:8484
-  python main.py --hosts http://localhost:8484,http://localhost:8485,http://localhost:8486
+  python main.py --seed http://192.168.1.125:8484
+  python main.py --seed http://localhost:7001,http://localhost:7002
         """,
     )
 
     parser.add_argument(
-        "--hosts",
+        "--seed",
         type=str,
         required=True,
-        help="Comma-separated list of host URLs (REQUIRED)",
+        help="Comma-separated list of seed host URLs for cluster discovery",
     )
 
     return parser.parse_args()
@@ -697,15 +715,16 @@ if __name__ == "__main__":
     try:
         args = parse_args()
 
-        # Parse the comma-separated host URLs
-        host_urls = [url.strip() for url in args.hosts.split(",") if url.strip()]
+        # Parse seed hosts
+        host_urls = [url.strip() for url in args.seed.split(",") if url.strip()]
 
         if not host_urls:
-            log("Error: No valid host URLs provided after parsing")
+            log("Error: No valid seed URLs provided after parsing")
             log("Please provide valid URLs separated by commas")
             sys.exit(1)
 
-        log(f"Connecting to LimeDB cluster hosts: {', '.join(host_urls)}")
+        log(f"Connecting to LimeDB cluster via seed hosts: {', '.join(host_urls)}")
+        log("TUI will automatically discover all cluster nodes through gossip protocol")
 
         app = LimeDB(host_urls=host_urls)
         app.run()
@@ -713,10 +732,9 @@ if __name__ == "__main__":
     except SystemExit as e:
         # This catches argparse exits (like --help or missing required args)
         if e.code != 0:
-            log("\nUsage: python main.py --hosts <comma-separated-urls>")
-            log(
-                "Example: python main.py --hosts http://192.168.1.125:8484,http://192.168.1.126:8484"
-            )
+            log("\nUsage: python main.py --seed <comma-separated-seed-urls>")
+            log("Example: python main.py --seed http://localhost:7001")
+            log("         python main.py --seed http://192.168.1.125:8484,http://192.168.1.126:8484")
         sys.exit(e.code)
     except Exception as e:
         log(f"Error: {e}")

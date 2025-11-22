@@ -21,7 +21,7 @@ func Load() *Config {
 	serverPort := flag.Int("server.port", 8484, "Server Port")
 	nodeUrl := flag.String("node.url", "", "This node's URL (REQUIRED, e.g., http://192.168.1.125:8484)")
 	peersStr := flag.String("node.peers", "", "Comma-separated list of peer URLs")
-	virtualNodes := flag.Int("node.routing.virtual-nodes", 2, "Number of virtual nodes per physical node")
+	virtualNodes := flag.Int("node.routing.virtual-nodes", 256, "Number of virtual nodes per physical node")
 	otelEndpoint := flag.String("otel.endpoint", "localhost:4317", "OTLP Collector Endpoint (e.g., localhost:4317)")
 
 	flag.Usage = func() {
