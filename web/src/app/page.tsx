@@ -1,37 +1,63 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { SummaryCards } from "@/components/dashboard/SummaryCards";
 import { ClusterStatusTable } from "@/components/dashboard/ClusterStatusTable";
 import { RingVisualizer } from "@/components/dashboard/RingVisualizer";
-import { DataExplorer } from "@/components/dashboard/DataExplorer";
+import { EnhancedDataExplorer } from "@/components/dashboard/EnhancedDataExplorer";
+import { PerformanceCharts } from "@/components/metrics/PerformanceCharts";
+import { RingDistributionChart } from "@/components/metrics/RingDistributionChart";
+import { GossipViewer } from "@/components/gossip/GossipViewer";
+import { EventLog } from "@/components/events/EventLog";
+import { SettingsPanel } from "@/components/settings/SettingsPanel";
+import { CommandPalette } from "@/components/command-palette";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { DiscoveredNodes } from "@/components/cluster/DiscoveredNodes";
+import { NetworkTopology } from "@/components/topology/NetworkTopology";
 import { api } from "@/lib/api";
-import { NodeStatus, RingState } from "@/lib/types";
+import { NodeStatus, RingState, GossipMetrics } from "@/lib/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Gauge, Activity, Network, Clock, Settings as SettingsIcon, Command } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { motion, AnimatePresence } from "framer-motion";
+import { Badge } from "@/components/ui/badge";
 
 export default function Dashboard() {
   const [node, setNode] = useState<NodeStatus | null>(null);
   const [ring, setRing] = useState<RingState>({ ranges: {} });
+  const [gossip, setGossip] = useState<GossipMetrics | null>(null);
+  const [discoveredNodes, setDiscoveredNodes] = useState<string[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState("overview");
+  const [connectionStatus, setConnectionStatus] = useState<"connected" | "disconnected" | "connecting">("connecting");
 
   const fetchData = async () => {
     setLoading(true);
     setError(null);
+    setConnectionStatus("connecting");
+    
     try {
-      const [nodeData, ringData] = await Promise.all([
+      // First discover all nodes
+      const hosts = await api.discoverCluster();
+      setDiscoveredNodes(hosts);
+      
+      const [nodeData, ringData, gossipData] = await Promise.all([
         api.getClusterStatus(),
         api.getRingState(),
+        api.getGossipMetrics(),
       ]);
       setNode(nodeData);
       setRing(ringData);
+      setGossip(gossipData);
       setLastUpdated(new Date());
+      setConnectionStatus("connected");
     } catch (err) {
       console.error("Failed to fetch data:", err);
       setError(err instanceof Error ? err.message : "Failed to connect to cluster");
+      setConnectionStatus("disconnected");
     } finally {
       setLoading(false);
     }
@@ -43,9 +69,26 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyboard = (e: KeyboardEvent) => {
+      if (e.key === "r" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        fetchData();
+      }
+      if (e.key >= "1" && e.key <= "5" && !e.metaKey && !e.ctrlKey) {
+        const tabs = ["overview", "metrics", "explorer", "events", "settings"];
+        setActiveTab(tabs[parseInt(e.key) - 1]);
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyboard);
+    return () => document.removeEventListener("keydown", handleKeyboard);
+  }, []);
+
   // Calculate summary stats
   const activeNodes = node?.status === "active" ? 1 : 0;
-  const totalNodes = node ? 1 + (node.peers?.length || 0) : 0;
+  const totalNodes = discoveredNodes.length || (node ? 1 + (node.peers?.length || 0) : 0);
   
   let health = "unknown";
   if (node) {
@@ -60,62 +103,156 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-background p-8">
-      <div className="mx-auto max-w-7xl space-y-8">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight text-lime-500">LimeDB Dashboard</h1>
-            <p className="text-muted-foreground">
-              Cluster Overview & Data Explorer
-            </p>
-          </div>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-muted-foreground">
-              Last updated: {lastUpdated.toLocaleTimeString()}
-            </span>
-            <Button variant="outline" size="icon" onClick={fetchData} disabled={loading}>
-              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            </Button>
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20">
+      <CommandPalette onNavigate={setActiveTab} onRefresh={fetchData} />
+      
+      {/* Glassmorphism Header */}
+      <div className="sticky top-0 z-50 border-b backdrop-blur-xl bg-background/80">
+        <div className="container mx-auto px-8 py-4">
+          <div className="flex items-center justify-between">
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.5 }}
+            >
+              <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-lime-500 via-green-500 to-emerald-500 bg-clip-text text-transparent">
+                LimeDB Dashboard
+              </h1>
+              <p className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
+                Cluster Monitoring & Management Console
+                <Badge variant={connectionStatus === "connected" ? "default" : "destructive"} className="text-xs">
+                  {connectionStatus}
+                </Badge>
+              </p>
+            </motion.div>
+            <div className="flex items-center gap-3">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="text-sm text-muted-foreground flex items-center gap-2"
+              >
+                <Clock className="h-4 w-4" />
+                {lastUpdated.toLocaleTimeString()}
+              </motion.div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={fetchData}
+                disabled={loading}
+                className="gap-2"
+              >
+                <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+                Refresh
+              </Button>
+              <ThemeToggle />
+              <Button variant="ghost" size="sm" className="gap-2 hidden md:flex">
+                <Command className="h-4 w-4" />
+                <kbd className="pointer-events-none inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground opacity-100">
+                  <span className="text-xs">⌘</span>K
+                </kbd>
+              </Button>
+            </div>
           </div>
         </div>
+      </div>
 
-        {/* Error Message */}
-        {error && (
-          <div className="rounded-md border border-red-500 bg-red-500/10 p-4 text-red-500">
-            {error}
-          </div>
-        )}
+      <div className="container mx-auto p-8 space-y-6">
+        {/* Animated Error Message */}
+        <AnimatePresence>
+          {error && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-        {/* Summary */}
-        <SummaryCards
-          health={health}
-          activeNodes={activeNodes}
-          totalKeys={totalKeys}
-        />
+        {/* Summary with animation */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.1 }}
+        >
+          <SummaryCards
+            health={health}
+            activeNodes={activeNodes}
+            totalKeys={totalKeys}
+          />
+        </motion.div>
 
-        {/* Main Content */}
-        <Tabs defaultValue="overview" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="explorer">Data Explorer</TabsTrigger>
-          </TabsList>
-          
-          <TabsContent value="overview" className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-              <div className="col-span-4">
-                <ClusterStatusTable node={node} />
-              </div>
-              <div className="col-span-3">
-                <RingVisualizer ring={ring} />
-              </div>
-            </div>
-          </TabsContent>
-          
-          <TabsContent value="explorer">
-            <DataExplorer />
-          </TabsContent>
-        </Tabs>
+        {/* Main Content with enhanced tabs */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.2 }}
+        >
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+            <TabsList className="grid w-full grid-cols-5 lg:w-[700px] bg-muted/50 backdrop-blur-sm">
+              <TabsTrigger value="overview" className="gap-2 data-[state=active]:bg-background">
+                <Gauge className="h-4 w-4" />
+                <span className="hidden sm:inline">Overview</span>
+              </TabsTrigger>
+              <TabsTrigger value="metrics" className="gap-2 data-[state=active]:bg-background">
+                <Activity className="h-4 w-4" />
+                <span className="hidden sm:inline">Metrics</span>
+              </TabsTrigger>
+              <TabsTrigger value="explorer" className="gap-2 data-[state=active]:bg-background">
+                <Network className="h-4 w-4" />
+                <span className="hidden sm:inline">Explorer</span>
+              </TabsTrigger>
+              <TabsTrigger value="events" className="gap-2 data-[state=active]:bg-background">
+                <Clock className="h-4 w-4" />
+                <span className="hidden sm:inline">Events</span>
+              </TabsTrigger>
+              <TabsTrigger value="settings" className="gap-2 data-[state=active]:bg-background">
+                <SettingsIcon className="h-4 w-4" />
+                <span className="hidden sm:inline">Settings</span>
+              </TabsTrigger>
+            </TabsList>
+            
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={activeTab}
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                transition={{ duration: 0.3 }}
+              >
+                <TabsContent value="overview" className="space-y-4 mt-0">
+                  <DiscoveredNodes nodes={discoveredNodes} currentNode={node?.nodeUrl || null} />
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <ClusterStatusTable node={node} />
+                    <RingVisualizer ring={ring} />
+                  </div>
+                  <NetworkTopology node={node} />
+                  <GossipViewer gossip={gossip} />
+                </TabsContent>
+                
+                <TabsContent value="metrics" className="space-y-4 mt-0">
+                  <PerformanceCharts />
+                  <RingDistributionChart ring={ring} />
+                </TabsContent>
+                
+                <TabsContent value="explorer" className="mt-0">
+                  <EnhancedDataExplorer />
+                </TabsContent>
+                
+                <TabsContent value="events" className="mt-0">
+                  <EventLog />
+                </TabsContent>
+                
+                <TabsContent value="settings" className="mt-0">
+                  <SettingsPanel />
+                </TabsContent>
+              </motion.div>
+            </AnimatePresence>
+          </Tabs>
+        </motion.div>
       </div>
     </div>
   );
