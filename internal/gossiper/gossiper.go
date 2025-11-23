@@ -441,19 +441,37 @@ func (g *Gossiper) handleSyn(payload SynPayload) AckPayload {
 			)
 		}
 
-		if !exists || digest.Heartbeat > localHeartbeat {
-			// Update our record if the received heartbeat is newer
+		// Detect node restart: if received heartbeat is much lower than stored,
+		// the peer likely restarted. Accept the lower heartbeat as new baseline.
+		restartDetected := exists && digest.Heartbeat < localHeartbeat && (localHeartbeat-digest.Heartbeat) > 100
+
+		if !exists || digest.Heartbeat > localHeartbeat || restartDetected {
+			// Update our record if:
+			// 1. This is a new peer, OR
+			// 2. The received heartbeat is newer, OR
+			// 3. Restart detected (heartbeat went backwards significantly)
+
 			oldHeartbeat := g.peerHeartbeats[digest.NodeURL]
 			g.peerHeartbeats[digest.NodeURL] = digest.Heartbeat
 			DigestsUpdate = append(DigestsUpdate, digest)
 			updatesApplied++
 
-			logger.Info("Heartbeat updated",
-				"peer", digest.NodeURL,
-				"old_heartbeat", oldHeartbeat,
-				"new_heartbeat", digest.Heartbeat,
-				"lag_reduced", digest.Heartbeat-oldHeartbeat,
-			)
+			if restartDetected {
+				logger.Warn("Peer restart detected",
+					"peer", digest.NodeURL,
+					"old_heartbeat", oldHeartbeat,
+					"new_heartbeat", digest.Heartbeat,
+					"heartbeat_dropped", oldHeartbeat-digest.Heartbeat,
+					"action", "resetting_to_new_baseline",
+				)
+			} else {
+				logger.Info("Heartbeat updated",
+					"peer", digest.NodeURL,
+					"old_heartbeat", oldHeartbeat,
+					"new_heartbeat", digest.Heartbeat,
+					"lag_reduced", digest.Heartbeat-oldHeartbeat,
+				)
+			}
 		} else if digest.Heartbeat < localHeartbeat {
 			// Request update from peer if our heartbeat is newer
 			DigestsRequest = append(DigestsRequest, Digests{
