@@ -282,7 +282,7 @@ class ClusterStatus(Static):
             # Extract port from URL for display
             try:
                 port = url.split(":")[-1]
-            except:
+            except Exception:
                 port = "?"
 
             # Gossip Status
@@ -357,8 +357,7 @@ class ClusterStatus(Static):
                 try:
                     gossip_widget = self.app.query_one(GossipDetails)
                     gossip_widget.update_gossip_details(selected_url, selected_gossip)
-                except Exception as e:
-                    # log(f"Error auto-updating gossip details: {e}")
+                except Exception:
                     pass
 
     def on_data_table_row_selected(self, event) -> None:
@@ -372,8 +371,8 @@ class ClusterStatus(Static):
                 try:
                     gossip_widget = self.app.query_one(GossipDetails)
                     gossip_widget.update_gossip_details(selected_url, gossip_data)
-                except Exception as e:
-                    log(f"Error updating gossip details: {e}")
+                except Exception:
+                    pass
 
     def on_data_table_row_highlighted(self, event) -> None:
         """Handle row highlighting to show gossip details immediately."""
@@ -386,8 +385,8 @@ class ClusterStatus(Static):
                 try:
                     gossip_widget = self.app.query_one(GossipDetails)
                     gossip_widget.update_gossip_details(selected_url, gossip_data)
-                except Exception as e:
-                    log(f"Error updating gossip details: {e}")
+                except Exception:
+                    pass
 
 
 class RingSegment(Static):
@@ -563,9 +562,9 @@ class DataExplorer(Static):
         # Try to parse JSON for pretty printing
         try:
             if isinstance(resp, dict) and "body" in resp:
-                 body_json = json.loads(resp["body"])
-                 resp["body"] = body_json
-        except:
+                body_json = json.loads(resp["body"])
+                resp["body"] = body_json
+        except Exception:
             pass
 
         output.update(resp)
@@ -705,42 +704,62 @@ class LimeDB(App):
             self.push_screen(NodeDetailsModal(url, node_data))
 
     async def update_data(self) -> None:
-        # First, discover new hosts through gossip
+        # Discover hosts via gossip from any known seed
         await self.discover_cluster_hosts()
-        
-        status_data = await self.client.get_all_nodes_status()
-        
-        # Check for events
+
+        # Build status_data purely from gossip (deprecated /cluster/state removed)
+        status_data = {}
+        gossip_data = {}
+        metrics_data = {}
+        tasks = []
+        urls = sorted(self.client.base_urls)
+
+        for url in urls:
+            tasks.append(self.client.get_gossip_metrics(url))  # gossip
+            tasks.append(self.fetch_node_metrics(url))          # metrics
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Pair results (gossip, metrics)
+        for idx, url in enumerate(urls):
+            gossip_result = results[idx * 2]
+            metrics_result = results[idx * 2 + 1]
+
+            if isinstance(gossip_result, Exception):
+                gossip_data[url] = {"error": str(gossip_result)}
+            else:
+                gossip_data[url] = gossip_result
+
+            if isinstance(metrics_result, Exception):
+                metrics_data[url] = {"error": str(metrics_result)}
+            else:
+                metrics_data[url] = metrics_result
+
+            # Derive status
+            if "error" in gossip_data[url]:
+                status_data[url] = {"error": gossip_data[url]["error"]}
+            else:
+                cluster_health = gossip_data[url].get("cluster_health", "unknown")
+                peer_details = gossip_data[url].get("peer_details", [])
+                active_peer_urls = [p.get("url") for p in peer_details if p.get("status") == "active"]
+                status_data[url] = {
+                    "nodeUrl": url,
+                    "status": "active",  # If reachable via gossip metrics
+                    "peers": active_peer_urls,
+                    "cluster_health": cluster_health,
+                }
+
+        # Events based on derived status
         self.check_for_events(status_data)
         self.previous_status_data = status_data
 
+        # Ring data from any active node
         ring_data = {"error": "No active nodes"}
-        for url, data in status_data.items():
-            if "error" not in data:
-                ring_data = await self.client.get_ring_state(url)
-                break
-
-        # Fetch Metrics and Gossip Data (Parallel)
-        metrics_data = {}
-        gossip_data = {}
-        tasks = []
-        urls = sorted(status_data.keys())
-
         for url in urls:
             if "error" not in status_data[url]:
-                tasks.append(self.fetch_node_metrics(url))
-                tasks.append(self.client.get_gossip_metrics(url))
-            else:
-                metrics_data[url] = {"error": "Node Down"}
-                gossip_data[url] = {"error": "Node Down"}
-
-        results = await asyncio.gather(*tasks)
-        active_urls = [u for u in urls if "error" not in status_data[u]]
-
-        # Split results between metrics and gossip (alternating in tasks list)
-        for i, url in enumerate(active_urls):
-            metrics_data[url] = results[i * 2]      # metrics
-            gossip_data[url] = results[i * 2 + 1]   # gossip
+                ring_candidate = await self.client.get_ring_state(url)
+                ring_data = ring_candidate
+                break
 
         self.query_one(ClusterStatus).update_status(status_data, metrics_data, gossip_data)
         self.query_one(RingVisualizer).update_ring(ring_data)
@@ -761,10 +780,12 @@ class LimeDB(App):
         
         # Keys count
         total_keys = 0
-        if "ranges" in ring_data:
-             for ranges in ring_data["ranges"].values():
-                 for r in ranges:
-                     total_keys += r.get("size", 0)
+        ranges_container = ring_data.get("ranges")
+        if isinstance(ranges_container, dict):
+            for ranges in ranges_container.values():
+                for r in ranges:
+                    if isinstance(r, dict):
+                        total_keys += r.get("size", 0)
         self.query_one("#card_keys").update_value(f"[blue]{total_keys}[/]")
 
     def check_for_events(self, current_status: dict) -> None:
@@ -807,7 +828,7 @@ class LimeDB(App):
                     # Update discovered hosts based on gossip data
                     self.client.update_discovered_hosts(gossip_data, url)
                     break
-            except Exception as e:
+            except Exception:
                 continue
 
     async def fetch_node_metrics(self, base_url: str) -> dict:
@@ -866,6 +887,5 @@ if __name__ == "__main__":
             log("Example: python main.py --seed http://localhost:7001")
             log("         python main.py --seed http://192.168.1.125:8484,http://192.168.1.126:8484")
         sys.exit(e.code)
-    except Exception as e:
-        log(f"Error: {e}")
+    except Exception:
         sys.exit(1)

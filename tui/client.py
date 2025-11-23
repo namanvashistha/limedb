@@ -16,22 +16,6 @@ class ClusterClient:
         """Returns a random URL from the available base URLs."""
         return random.choice(self.base_urls)
 
-    async def get_node_status(self, base_url: str) -> Dict[str, Any]:
-        url = f"{base_url}/api/v1/cluster/state"
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=2) as response:
-                    if response.status == 200:
-                        return await response.json()
-                    return {"error": f"Status {response.status}"}
-        except Exception as e:
-            return {"error": str(e)}
-
-    async def get_all_nodes_status(self) -> Dict[str, Dict[str, Any]]:
-        tasks = [self.get_node_status(base_url) for base_url in self.base_urls]
-        results = await asyncio.gather(*tasks)
-        return {base_url: result for base_url, result in zip(self.base_urls, results)}
-
     async def get_ring_state(self, base_url: Optional[str] = None) -> Dict[str, Any]:
         if base_url is None:
             base_url = self.get_random_url()
@@ -133,10 +117,10 @@ class ClusterClient:
         return metrics
 
     async def measure_latency(self, base_url: Optional[str] = None) -> float:
-        """Measures latency to the node in milliseconds."""
+        """Measures latency to the node in milliseconds using /health endpoint."""
         if base_url is None:
             base_url = self.get_random_url()
-        url = f"{base_url}/api/v1/cluster/state"
+        url = f"{base_url}/api/v1/health"
         start = asyncio.get_event_loop().time()
         try:
             async with aiohttp.ClientSession() as session:

@@ -34,7 +34,12 @@ func NewService(nodeUrl string, virtualNodes int, peers []string) *NodeService {
 	currentNodeUrl := nodeUrl
 
 	r := ring.New(virtualNodes)
+	// IMPORTANT: Include current node itself in the ring so single-node clusters work
+	r.AddNode(currentNodeUrl)
 	for _, peer := range peers {
+		if peer == currentNodeUrl { // Skip duplicate self reference if present in peer list
+			continue
+		}
 		r.AddNode(peer)
 	}
 
@@ -68,8 +73,17 @@ func (s *NodeService) SyncWithGossip(activePeers []string) {
 		}
 	}
 
-	// Add new nodes from gossip
+	// Always ensure current node is present
+	if !currentNodes[s.currentNodeUrl] {
+		s.ring.AddNode(s.currentNodeUrl)
+		currentNodes[s.currentNodeUrl] = true
+	}
+
+	// Add new nodes from gossip (excluding self which we already ensured)
 	for peer := range activeNodes {
+		if peer == s.currentNodeUrl {
+			continue
+		}
 		if !currentNodes[peer] {
 			s.ring.AddNode(peer)
 		}
