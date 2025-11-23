@@ -1,8 +1,9 @@
 export interface NodeStatus {
   nodeUrl: string;
-  status: "active" | "dead" | "unknown";
+  status: "active" | "dead" | "stale" | "unknown";
   peers: string[];
   totalNodes: number;
+  isSelf?: boolean;
 }
 
 export interface GossipMetrics {
@@ -38,6 +39,7 @@ export interface RingState {
   version?: number;
   currentNode?: string;
   allNodes?: string[];
+  virtualNodesPerNode?: number;
 }
 
 export interface KeyValueResponse {

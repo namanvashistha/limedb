@@ -3,14 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { NodeStatus } from "@/lib/types";
-import { Network, Maximize2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Network } from "lucide-react";
 import dynamic from "next/dynamic";
 
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), { ssr: false });
 
 interface NetworkTopologyProps {
-  node: NodeStatus | null;
+  nodes: Record<string, NodeStatus>;
 }
 
 interface GraphNode {
@@ -27,55 +26,70 @@ interface GraphLink {
   color: string;
 }
 
-export function NetworkTopology({ node }: NetworkTopologyProps) {
+export function NetworkTopology({ nodes }: NetworkTopologyProps) {
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; links: GraphLink[] }>({
     nodes: [],
     links: [],
   });
   const [dimensions, setDimensions] = useState({ width: 800, height: 500 });
   const containerRef = useRef<HTMLDivElement>(null);
+  const fgRef = useRef<any>(null);
 
   useEffect(() => {
-    if (!node) {
+    const nodesList = Object.values(nodes);
+    if (nodesList.length === 0) {
       setGraphData({ nodes: [], links: [] });
       return;
     }
 
-    const nodes: GraphNode[] = [];
-    const links: GraphLink[] = [];
+    const graphNodes: GraphNode[] = [];
+    const graphLinks: GraphLink[] = [];
+    const processedLinks = new Set<string>();
 
-    // Add current node
-    const currentNodeId = node.nodeUrl;
-    nodes.push({
-      id: currentNodeId,
-      name: currentNodeId,
-      val: 30,
-      color: node.status === "active" ? "#84cc16" : "#ef4444",
-      status: node.status,
+    // Add all nodes
+    nodesList.forEach((node) => {
+      graphNodes.push({
+        id: node.nodeUrl,
+        name: node.nodeUrl,
+        val: node.status === "active" ? 30 : 20,
+        color: node.status === "active" ? "#84cc16" : node.status === "stale" ? "#eab308" : "#ef4444",
+        status: node.status,
+      });
+
+      // Add links to peers (avoid duplicates)
+      if (node.peers && node.peers.length > 0) {
+        node.peers.forEach((peer) => {
+          const linkId = [node.nodeUrl, peer].sort().join("--");
+          if (!processedLinks.has(linkId)) {
+            processedLinks.add(linkId);
+            graphLinks.push({
+              source: node.nodeUrl,
+              target: peer,
+              color: node.status === "active" ? "#84cc16" : "#666",
+            });
+          }
+        });
+      }
     });
 
-    // Add peer nodes
-    if (node.peers && node.peers.length > 0) {
-      node.peers.forEach((peer) => {
-        nodes.push({
-          id: peer,
-          name: peer,
-          val: 20,
-          color: "#3b82f6",
-          status: "peer",
-        });
+    setGraphData({ nodes: graphNodes, links: graphLinks });
+  }, [nodes]);
 
-        // Create bidirectional link
-        links.push({
-          source: currentNodeId,
-          target: peer,
-          color: "#84cc16",
-        });
-      });
+  // Configure forces for better separation
+  useEffect(() => {
+    if (fgRef.current) {
+      const fg = fgRef.current;
+      
+      // Increase repulsion force
+      fg.d3Force('charge')?.strength(-500);
+      
+      // Increase link distance
+      fg.d3Force('link')?.distance(150);
+      
+      // Reduce center gravity
+      fg.d3Force('center')?.strength(0.05);
     }
-
-    setGraphData({ nodes, links });
-  }, [node]);
+  }, [graphData]);
 
   useEffect(() => {
     const updateDimensions = () => {
@@ -90,7 +104,7 @@ export function NetworkTopology({ node }: NetworkTopologyProps) {
     return () => window.removeEventListener("resize", updateDimensions);
   }, []);
 
-  if (!node || graphData.nodes.length === 0) {
+  if (graphData.nodes.length === 0) {
     return (
       <Card>
         <CardHeader>
@@ -99,8 +113,10 @@ export function NetworkTopology({ node }: NetworkTopologyProps) {
             Network Topology
           </CardTitle>
         </CardHeader>
-        <CardContent className="flex items-center justify-center h-64 text-muted-foreground">
-          No cluster topology data available
+        <CardContent className="flex flex-col items-center justify-center h-64 text-muted-foreground space-y-2">
+          <Network className="h-12 w-12 opacity-20" />
+          <p>No topology data available</p>
+          <p className="text-xs">Nodes will appear here once discovered</p>
         </CardContent>
       </Card>
     );
@@ -117,11 +133,15 @@ export function NetworkTopology({ node }: NetworkTopologyProps) {
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <div className="flex items-center gap-1">
               <div className="w-3 h-3 rounded-full bg-lime-500" />
-              <span>Active Node</span>
+              <span>Active</span>
             </div>
             <div className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded-full bg-blue-500" />
-              <span>Peer Nodes</span>
+              <div className="w-3 h-3 rounded-full bg-yellow-500" />
+              <span>Stale</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 rounded-full bg-red-500" />
+              <span>Dead</span>
             </div>
           </div>
         </div>
@@ -129,6 +149,7 @@ export function NetworkTopology({ node }: NetworkTopologyProps) {
       <CardContent>
         <div ref={containerRef} className="relative bg-muted/30 rounded-lg overflow-hidden">
           <ForceGraph2D
+            ref={fgRef}
             graphData={graphData}
             width={dimensions.width}
             height={dimensions.height}
@@ -146,8 +167,10 @@ export function NetworkTopology({ node }: NetworkTopologyProps) {
             enableZoomInteraction={true}
             enablePanInteraction={true}
             cooldownTicks={100}
+            d3AlphaDecay={0.02}
+            d3VelocityDecay={0.3}
             onNodeClick={(node: any) => {
-              console.log("Node clicked:", node);
+              // Node clicked - could add details modal here
             }}
             nodeCanvasObjectMode={() => "after"}
             nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {

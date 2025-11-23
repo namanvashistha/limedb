@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/valyala/fasthttp"
 )
@@ -77,6 +78,32 @@ func main() {
 	// Initialize HTTP Server
 	logger.Info("🌐 Initializing HTTP server")
 	srv := server.NewServer(svc, g, cfg.ServerPort)
+
+	// Start periodic ring synchronization with gossip
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			// Get active peers from gossip
+			gossipMetrics := g.GetGossipMetrics()
+			if peerDetails, ok := gossipMetrics["peer_details"].([]interface{}); ok {
+				activePeers := make([]string, 0)
+				for _, p := range peerDetails {
+					if peerMap, ok := p.(map[string]interface{}); ok {
+						if url, ok := peerMap["url"].(string); ok {
+							// Only add active peers to the ring
+							if status, ok := peerMap["status"].(string); ok && status == "active" {
+								activePeers = append(activePeers, url)
+							}
+						}
+					}
+				}
+				// Sync the ring with active gossip peers
+				svc.SyncWithGossip(activePeers)
+			}
+		}
+	}()
 
 	// Start Server in a goroutine
 	serverStarted := make(chan bool, 1)

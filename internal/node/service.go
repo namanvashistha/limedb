@@ -46,6 +46,36 @@ func NewService(nodeUrl string, virtualNodes int, peers []string) *NodeService {
 	}
 }
 
+// SyncWithGossip updates the ring to match the active peers from gossip.
+// This should be called periodically to keep the ring in sync with the cluster state.
+func (s *NodeService) SyncWithGossip(activePeers []string) {
+	// Get current ring nodes
+	currentNodes := make(map[string]bool)
+	for _, node := range s.ring.GetNodes() {
+		currentNodes[node] = true
+	}
+
+	// Build map of active peers
+	activeNodes := make(map[string]bool)
+	for _, peer := range activePeers {
+		activeNodes[peer] = true
+	}
+
+	// Remove nodes that are no longer in gossip
+	for node := range currentNodes {
+		if !activeNodes[node] {
+			s.ring.RemoveNode(node)
+		}
+	}
+
+	// Add new nodes from gossip
+	for peer := range activeNodes {
+		if !currentNodes[peer] {
+			s.ring.AddNode(peer)
+		}
+	}
+}
+
 // GetRing returns the underlying hash ring.
 func (s *NodeService) GetRing() *ring.ConsistentHashRing {
 	return s.ring

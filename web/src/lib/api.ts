@@ -6,7 +6,7 @@ class ClusterClient {
   private discoveredHosts: Set<string> = new Set();
   private seedUrl: string;
 
-  constructor(seedUrl: string = "http://192.168.0.124:8484") {
+  constructor(seedUrl: string = "http://192.168.1.124:8484") {
     this.seedUrl = seedUrl;
     this.discoveredHosts.add(seedUrl);
   }
@@ -32,43 +32,53 @@ class ClusterClient {
     }
   }
 
-  async getClusterStatus(): Promise<NodeStatus> {
-    const res = await fetch(`${BASE_URL}/cluster/state`);
-    if (!res.ok) throw new Error("Failed to fetch cluster status");
-    return res.json();
-  }
-
-  // Get status from all discovered nodes
-  async getAllNodesStatus(): Promise<Record<string, NodeStatus | { error: string }>> {
-    // First discover all nodes
-    await this.discoverCluster();
+  // Derive cluster status from gossip metrics and ring state
+  async getClusterStatus(): Promise<{ 
+    gossip: GossipMetrics; 
+    nodes: Record<string, NodeStatus>; 
+    selfNode: string | null;
+  }> {
+    const [gossip, ring] = await Promise.all([
+      this.getGossipMetrics(),
+      this.getRingState(),
+    ]);
     
-    const hosts = Array.from(this.discoveredHosts);
-    const statusMap: Record<string, NodeStatus | { error: string }> = {};
-
-    // Query all nodes in parallel
-    const results = await Promise.allSettled(
-      hosts.map(async (host) => {
-        try {
-          // For now, we only query the seed through proxy
-          // In a full implementation, we'd proxy requests to all hosts
-          const res = await fetch(`${BASE_URL}/cluster/state`);
-          if (!res.ok) throw new Error("Failed to fetch");
-          const data = await res.json();
-          return { host, data };
-        } catch (error) {
-          return { host, data: { error: error instanceof Error ? error.message : "Unknown error" } };
-        }
-      })
-    );
-
-    results.forEach((result) => {
-      if (result.status === "fulfilled") {
-        statusMap[result.value.host] = result.value.data;
+    // Get self node from ring state
+    const selfNode = ring.currentNode as string || null;
+    
+    // Build node status map from gossip peer_details
+    const nodes: Record<string, NodeStatus> = {};
+    
+    // Add self node first if available
+    if (selfNode && gossip.peer_details) {
+      const selfPeer = gossip.peer_details.find(p => p.url === selfNode);
+      if (selfPeer) {
+        nodes[selfNode] = {
+          nodeUrl: selfNode,
+          status: selfPeer.status,
+          peers: gossip.peer_details.filter(p => p.url !== selfNode).map(p => p.url),
+          totalNodes: gossip.total_peers,
+          isSelf: true,
+        };
       }
-    });
-
-    return statusMap;
+    }
+    
+    // Add peer nodes
+    if (gossip.peer_details && gossip.peer_details.length > 0) {
+      gossip.peer_details.forEach((peer) => {
+        if (peer.url !== selfNode && !nodes[peer.url]) {
+          nodes[peer.url] = {
+            nodeUrl: peer.url,
+            status: peer.status,
+            peers: gossip.peer_details.filter(p => p.url !== peer.url).map(p => p.url),
+            totalNodes: gossip.total_peers,
+            isSelf: false,
+          };
+        }
+      });
+    }
+    
+    return { gossip, nodes, selfNode };
   }
 
   async getRingState(): Promise<RingState> {

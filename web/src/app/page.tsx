@@ -12,7 +12,6 @@ import { EventLog } from "@/components/events/EventLog";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { CommandPalette } from "@/components/command-palette";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { DiscoveredNodes } from "@/components/cluster/DiscoveredNodes";
 import { NetworkTopology } from "@/components/topology/NetworkTopology";
 import { api } from "@/lib/api";
 import { NodeStatus, RingState, GossipMetrics } from "@/lib/types";
@@ -24,7 +23,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
 
 export default function Dashboard() {
-  const [node, setNode] = useState<NodeStatus | null>(null);
+  const [nodes, setNodes] = useState<Record<string, NodeStatus>>({});
+  const [selfNode, setSelfNode] = useState<string | null>(null);
   const [ring, setRing] = useState<RingState>({ ranges: {} });
   const [gossip, setGossip] = useState<GossipMetrics | null>(null);
   const [discoveredNodes, setDiscoveredNodes] = useState<string[]>([]);
@@ -44,14 +44,16 @@ export default function Dashboard() {
       const hosts = await api.discoverCluster();
       setDiscoveredNodes(hosts);
       
-      const [nodeData, ringData, gossipData] = await Promise.all([
-        api.getClusterStatus(),
+      // Use gossip as source of truth for cluster status
+      const [clusterData, ringData] = await Promise.all([
+        api.getClusterStatus(), // Returns { gossip, nodes, selfNode }
         api.getRingState(),
-        api.getGossipMetrics(),
       ]);
-      setNode(nodeData);
+      
+      setNodes(clusterData.nodes);
+      setSelfNode(clusterData.selfNode);
+      setGossip(clusterData.gossip);
       setRing(ringData);
-      setGossip(gossipData);
       setLastUpdated(new Date());
       setConnectionStatus("connected");
     } catch (err) {
@@ -86,13 +88,18 @@ export default function Dashboard() {
     return () => document.removeEventListener("keydown", handleKeyboard);
   }, []);
 
-  // Calculate summary stats
-  const activeNodes = node?.status === "active" ? 1 : 0;
-  const totalNodes = discoveredNodes.length || (node ? 1 + (node.peers?.length || 0) : 0);
+  // Calculate summary stats from gossip-derived nodes
+  const nodesList = Object.values(nodes);
+  const activeNodes = nodesList.filter(n => n.status === "active").length;
+  const totalNodes = discoveredNodes.length || nodesList.length;
   
   let health = "unknown";
-  if (node) {
-    health = node.status === "active" ? "healthy" : "critical";
+  if (activeNodes === 0 && totalNodes > 0) {
+    health = "critical";
+  } else if (activeNodes < totalNodes) {
+    health = "degraded";
+  } else if (activeNodes > 0) {
+    health = "healthy";
   }
 
   let totalKeys = 0;
@@ -224,18 +231,17 @@ export default function Dashboard() {
                 transition={{ duration: 0.3 }}
               >
                 <TabsContent value="overview" className="space-y-4 mt-0">
-                  <DiscoveredNodes nodes={discoveredNodes} currentNode={node?.nodeUrl || null} />
                   <div className="grid gap-4 lg:grid-cols-2">
-                    <ClusterStatusTable node={node} />
+                    <ClusterStatusTable nodes={nodes} />
                     <RingVisualizer ring={ring} />
                   </div>
-                  <NetworkTopology node={node} />
+                  <NetworkTopology nodes={nodes} />
                   <GossipViewer gossip={gossip} />
                 </TabsContent>
                 
                 <TabsContent value="metrics" className="space-y-4 mt-0">
                   <PerformanceCharts />
-                  <RingDistributionChart ring={ring} />
+                  <RingDistributionChart ring={ring} gossip={gossip} />
                 </TabsContent>
                 
                 <TabsContent value="explorer" className="mt-0">
