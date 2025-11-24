@@ -182,11 +182,12 @@ export function NetworkTopology() {
             target: to,
             sourceHandle,
             targetHandle,
-            type: "straight", // Use straight lines for shortest path
-            animated: bidirectional,
+            type: "default", // Curvy bezier lines
+            animated: !bidirectional, // Only animate one-way connections
             style: {
               stroke: bidirectional ? "#84cc16" : "#eab308",
               strokeWidth: bidirectional ? 2.5 : 2,
+              strokeDasharray: bidirectional ? "5,5" : undefined, // Dashed for bidirectional
             },
             markerEnd: bidirectional ? undefined : {
               type: MarkerType.ArrowClosed,
@@ -210,7 +211,7 @@ export function NetworkTopology() {
   }, [setNodes, setEdges]);
 
   const edgeTypeCounts = useMemo(() => {
-    const bidirectional = edges.filter(e => e.animated).length;
+    const bidirectional = edges.filter(e => !e.animated).length; // Bidirectional are NOT animated
     const unidirectional = edges.length - bidirectional;
     return { bidirectional, unidirectional };
   }, [edges]);
@@ -259,9 +260,27 @@ export function NetworkTopology() {
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
+            onNodesChange={(changes) => {
+              // Allow dragging by applying node changes
+              setNodes((nds) => {
+                const updated = [...nds];
+                changes.forEach((change) => {
+                  if (change.type === 'position' && change.dragging) {
+                    const node = updated.find(n => n.id === change.id);
+                    if (node && change.position) {
+                      node.position = change.position;
+                    }
+                  }
+                });
+                return updated;
+              });
+            }}
             fitView
             minZoom={0.5}
             maxZoom={2}
+            nodesDraggable={true}
+            nodesConnectable={false}
+            elementsSelectable={true}
             defaultEdgeOptions={{
               animated: false,
             }}
