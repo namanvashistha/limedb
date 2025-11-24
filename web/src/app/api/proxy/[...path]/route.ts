@@ -1,15 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const SEED_URL = process.env.LIMEDB_SEED_URL || "http://192.168.1.124:8484";
+const SEED_URL = process.env.LIMEDB_SEED_URL || "http://localhost:8484";
 const API_BASE = `${SEED_URL}/api/v1`;
 
 async function proxyRequest(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
   
-  // Build URL with query parameters
-  const searchParams = req.nextUrl.searchParams.toString();
-  const queryString = searchParams ? `?${searchParams}` : '';
-  const url = `${API_BASE}/${path.join("/")}${queryString}`;
+  // Check if a specific node is requested via query param
+  const targetNode = req.nextUrl.searchParams.get('node');
+  const baseUrl = targetNode || SEED_URL;
+  const apiBase = `${baseUrl}/api/v1`;
+  
+  // Build URL with query parameters (excluding 'node' param used for routing)
+  const searchParams = new URLSearchParams(req.nextUrl.searchParams);
+  searchParams.delete('node'); // Remove node param from forwarded request
+  const queryString = searchParams.toString() ? `?${searchParams.toString()}` : '';
+  const url = `${apiBase}/${path.join("/")}${queryString}`;
   
   try {
     const options: RequestInit = {

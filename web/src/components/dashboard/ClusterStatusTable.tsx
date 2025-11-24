@@ -9,7 +9,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { NodeStatus } from "@/lib/types";
-import { Server, Star } from "lucide-react";
+import { Server } from "lucide-react";
 
 interface ClusterStatusTableProps {
   nodes: Record<string, NodeStatus>;
@@ -18,10 +18,8 @@ interface ClusterStatusTableProps {
 export function ClusterStatusTable({ nodes }: ClusterStatusTableProps) {
   const nodesList = Object.values(nodes);
   
-  // Sort: self node first, then by URL alphabetically
+  // Sort alphabetically by URL - ALL NODES EQUAL, no self-node priority
   const sortedNodes = nodesList.sort((a, b) => {
-    if (a.isSelf) return -1;
-    if (b.isSelf) return 1;
     return a.nodeUrl.localeCompare(b.nodeUrl);
   });
   
@@ -68,23 +66,16 @@ export function ClusterStatusTable({ nodes }: ClusterStatusTableProps) {
             <TableBody>
               {sortedNodes.map((node) => {
                 const isActive = node.status === "active";
-                const isSelf = node.isSelf;
+                // NO SPECIAL TREATMENT - all nodes are peers
                 return (
                   <TableRow 
                     key={node.nodeUrl} 
-                    className={`hover:bg-muted/50 transition-colors ${isSelf ? 'bg-lime-500/5' : ''}`}
+                    className="hover:bg-muted/50 transition-colors"
                   >
                     <TableCell>
-                      {isSelf ? (
-                        <Badge variant="outline" className="border-lime-500 text-lime-500">
-                          <Star className="h-3 w-3 mr-1 fill-lime-500" />
-                          Self
-                        </Badge>
-                      ) : (
-                        <Badge variant="secondary">
-                          Peer
-                        </Badge>
-                      )}
+                      <Badge variant="secondary">
+                        Peer
+                      </Badge>
                     </TableCell>
                     <TableCell>
                       {isActive ? (

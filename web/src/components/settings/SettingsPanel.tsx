@@ -6,8 +6,9 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Settings as SettingsIcon, Save } from "lucide-react";
+import { api } from "@/lib/api";
 
 interface SettingsPanelProps {
   refreshInterval: number;
@@ -22,7 +23,17 @@ export function SettingsPanel({
   autoRefresh, 
   setAutoRefresh 
 }: SettingsPanelProps) {
-  const [seedUrl, setSeedUrl] = useState("http://192.168.1.124:8484");
+  const [seedUrl, setSeedUrl] = useState("http://localhost:8484");
+
+  useEffect(() => {
+    const savedSettings = localStorage.getItem("limedb_settings");
+    if (savedSettings) {
+      const settings = JSON.parse(savedSettings);
+      if (settings.seedUrl) {
+        setSeedUrl(settings.seedUrl);
+      }
+    }
+  }, []);
 
   const handleSave = () => {
     // Save settings to localStorage
@@ -31,7 +42,12 @@ export function SettingsPanel({
       autoRefresh,
       seedUrl,
     }));
-    alert("Settings saved!");
+    
+    // Update API client
+    api.setSeedUrl(seedUrl);
+    
+    // Reload to ensure fresh state
+    window.location.reload();
   };
 
   return (

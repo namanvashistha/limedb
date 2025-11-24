@@ -344,6 +344,7 @@ func (g *Gossiper) GetGossipMetrics() map[string]interface{} {
 			"status":         "standalone",
 			"node_heartbeat": g.heartbeat,
 			"total_peers":    0,
+			"node_url":       g.currentNodeUrl,
 			"cluster_health": "N/A",
 		}
 	}
@@ -401,6 +402,7 @@ func (g *Gossiper) GetGossipMetrics() map[string]interface{} {
 
 	return map[string]interface{}{
 		"node_heartbeat":   g.heartbeat,
+		"node_url":         g.currentNodeUrl,
 		"cluster_health":   clusterHealth,
 		"total_peers":      totalPeers,
 		"active_peers":     activePeers,

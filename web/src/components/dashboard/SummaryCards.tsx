@@ -7,10 +7,11 @@ import { motion } from "framer-motion";
 interface SummaryCardsProps {
   health: string;
   activeNodes: number;
+  totalNodes: number;
   totalKeys: number;
 }
 
-export function SummaryCards({ health, activeNodes, totalKeys }: SummaryCardsProps) {
+export function SummaryCards({ health, activeNodes, totalNodes, totalKeys }: SummaryCardsProps) {
   const healthColor =
     health === "healthy"
       ? "text-green-500"
@@ -62,13 +63,18 @@ export function SummaryCards({ health, activeNodes, totalKeys }: SummaryCardsPro
       >
         <Card className="hover:border-primary/40 transition-colors">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Nodes</CardTitle>
+            <CardTitle className="text-sm font-medium">Cluster Nodes</CardTitle>
             <Server className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{activeNodes}</div>
+            <div className="text-2xl font-bold">
+              <span className="text-green-500">{activeNodes}</span>
+              <span className="text-muted-foreground text-lg"> / {totalNodes}</span>
+            </div>
             <p className="text-xs text-muted-foreground mt-1">
-              {activeNodes === 1 ? "node" : "nodes"} online
+              {activeNodes === totalNodes ? "All nodes active" : 
+               activeNodes === 0 ? "All nodes down" : 
+               `${totalNodes - activeNodes} inactive`}
             </p>
           </CardContent>
         </Card>

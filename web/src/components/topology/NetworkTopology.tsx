@@ -112,7 +112,7 @@ export function NetworkTopology({ nodes }: NetworkTopologyProps) {
 
     setGraphData({ nodes: graphNodes, links: graphLinks });
     prevNodesRef.current = nodes;
-  }, [nodes, nodesChanged, graphData.nodes]);
+  }, [nodes, nodesChanged]);
 
   // Configure forces for better separation (only once on mount)
   useEffect(() => {
