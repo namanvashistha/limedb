@@ -18,15 +18,18 @@ echo "========================================="
 echo "Creating $NUM_NODES LimeDB nodes..."
 echo ""
 
-# Fetch latest release tag
-TAG=$(wget -qO- https://api.github.com/repos/namanvashistha/limedb/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+# Fetch latest release tag from redirect location
+TAG=$(curl -sI https://github.com/namanvashistha/limedb/releases/latest \
+  | grep -i ^location: \
+  | sed 's/.*tag\///' \
+  | tr -d '\r')
 echo "✓ Latest LimeDB version: $TAG"
 echo ""
 
 # Download the base LXC script
 SCRIPT_URL="https://raw.githubusercontent.com/namanvashistha/limedb/$TAG/proxmox/limedb_lxc.sh"
 TMP_SCRIPT=$(mktemp)
-wget -qO "$TMP_SCRIPT" "$SCRIPT_URL"
+curl -sL "$SCRIPT_URL" -o "$TMP_SCRIPT"
 chmod +x "$TMP_SCRIPT"
 
 echo "Creating nodes..."
