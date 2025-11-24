@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { NodeStatus } from "@/lib/types";
 import { Network } from "lucide-react";
@@ -18,6 +18,10 @@ interface GraphNode {
   val: number;
   color: string;
   status: string;
+  x?: number;
+  y?: number;
+  vx?: number;
+  vy?: number;
 }
 
 interface GraphLink {
@@ -34,26 +38,60 @@ export function NetworkTopology({ nodes }: NetworkTopologyProps) {
   const [dimensions, setDimensions] = useState({ width: 800, height: 500 });
   const containerRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<any>(null);
+  const prevNodesRef = useRef<Record<string, NodeStatus>>({});
+
+  // Check if nodes have actually changed (deep comparison of keys and status)
+  const nodesChanged = useMemo(() => {
+    const currentKeys = Object.keys(nodes).sort().join(',');
+    const prevKeys = Object.keys(prevNodesRef.current).sort().join(',');
+    
+    if (currentKeys !== prevKeys) return true;
+    
+    // Check if any node status changed
+    for (const key in nodes) {
+      if (nodes[key].status !== prevNodesRef.current[key]?.status) {
+        return true;
+      }
+    }
+    return false;
+  }, [nodes]);
 
   useEffect(() => {
-    const nodesList = Object.values(nodes);
-    if (nodesList.length === 0) {
-      setGraphData({ nodes: [], links: [] });
+    // Only update if nodes actually changed
+    if (!nodesChanged && graphData.nodes.length > 0) {
       return;
     }
 
+    const nodesList = Object.values(nodes);
+    if (nodesList.length === 0) {
+      setGraphData({ nodes: [], links: [] });
+      prevNodesRef.current = {};
+      return;
+    }
+
+    // Preserve existing node positions
+    const existingNodesMap = new Map(graphData.nodes.map(n => [n.id, n]));
+    
     const graphNodes: GraphNode[] = [];
     const graphLinks: GraphLink[] = [];
     const processedLinks = new Set<string>();
 
-    // Add all nodes
+    // Add all nodes, preserving positions if they exist
     nodesList.forEach((node) => {
+      const existingNode = existingNodesMap.get(node.nodeUrl);
       graphNodes.push({
         id: node.nodeUrl,
         name: node.nodeUrl,
         val: node.status === "active" ? 30 : 20,
         color: node.status === "active" ? "#84cc16" : node.status === "stale" ? "#eab308" : "#ef4444",
         status: node.status,
+        // Preserve position and velocity if node already exists
+        ...(existingNode && {
+          x: existingNode.x,
+          y: existingNode.y,
+          vx: existingNode.vx,
+          vy: existingNode.vy,
+        }),
       });
 
       // Add links to peers (avoid duplicates)
@@ -73,11 +111,12 @@ export function NetworkTopology({ nodes }: NetworkTopologyProps) {
     });
 
     setGraphData({ nodes: graphNodes, links: graphLinks });
-  }, [nodes]);
+    prevNodesRef.current = nodes;
+  }, [nodes, nodesChanged, graphData.nodes]);
 
-  // Configure forces for better separation
+  // Configure forces for better separation (only once on mount)
   useEffect(() => {
-    if (fgRef.current) {
+    if (fgRef.current && graphData.nodes.length > 0) {
       const fg = fgRef.current;
       
       // Increase repulsion force
@@ -89,7 +128,7 @@ export function NetworkTopology({ nodes }: NetworkTopologyProps) {
       // Reduce center gravity
       fg.d3Force('center')?.strength(0.05);
     }
-  }, [graphData]);
+  }, [graphData.nodes.length]);
 
   useEffect(() => {
     const updateDimensions = () => {

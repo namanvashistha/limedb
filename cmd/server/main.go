@@ -92,8 +92,8 @@ func main() {
 				for _, p := range peerDetails {
 					if peerMap, ok := p.(map[string]interface{}); ok {
 						if url, ok := peerMap["url"].(string); ok {
-							// Only add active peers to the ring
-							if status, ok := peerMap["status"].(string); ok && status == "active" {
+							// Add active and stale peers to the ring (exclude only dead peers)
+							if status, ok := peerMap["status"].(string); ok && (status == "active" || status == "stale") {
 								activePeers = append(activePeers, url)
 							}
 						}

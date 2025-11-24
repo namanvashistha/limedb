@@ -1,6 +1,7 @@
 package node
 
 import (
+	"sort"
 	"sync"
 )
 
@@ -32,4 +33,25 @@ func (s *Store) Set(key, value string) {
 func (s *Store) Delete(key string) bool {
 	_, ok := s.data.LoadAndDelete(key)
 	return ok
+}
+
+// ListKeys returns all keys in sorted order.
+func (s *Store) ListKeys() []string {
+	keys := make([]string, 0)
+	s.data.Range(func(key, value interface{}) bool {
+		keys = append(keys, key.(string))
+		return true
+	})
+	sort.Strings(keys)
+	return keys
+}
+
+// Count returns the total number of keys.
+func (s *Store) Count() int {
+	count := 0
+	s.data.Range(func(key, value interface{}) bool {
+		count++
+		return true
+	})
+	return count
 }

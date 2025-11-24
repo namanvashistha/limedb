@@ -1,250 +1,363 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { api } from "@/lib/api";
-import { Database, Loader2, Copy, Trash2, Plus } from "lucide-react";
+import { Database, Loader2, ChevronLeft, ChevronRight, Play, Trash2, Edit } from "lucide-react";
 
-interface HistoryItem {
-  timestamp: string;
-  action: "GET" | "SET" | "DEL";
+interface KeyData {
   key: string;
-  value?: string;
-  result: any;
+  value: string;
+  size: number;
 }
 
 export function EnhancedDataExplorer() {
-  const [key, setKey] = useState("");
-  const [value, setValue] = useState("");
+  const [query, setQuery] = useState("");
+  const [allKeys, setAllKeys] = useState<KeyData[]>([]);
+  const [filteredKeys, setFilteredKeys] = useState<KeyData[]>([]);
   const [loading, setLoading] = useState(false);
-  const [response, setResponse] = useState<any>(null);
-  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [executing, setExecuting] = useState(false);
+  const [queryResult, setQueryResult] = useState<any>(null);
   
-  // Bulk operations
-  const [bulkKeys, setBulkKeys] = useState("");
-  const [bulkValue, setBulkValue] = useState("");
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize] = useState(20);
+  
+  // Edit mode
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
 
-  const handleAction = async (action: "GET" | "SET" | "DEL") => {
-    if (!key) return;
-
+  const loadAllKeys = useCallback(async () => {
     setLoading(true);
-    setResponse(null);
-
     try {
-      let res;
-      if (action === "GET") {
-        res = await api.getKey(key);
-      } else if (action === "SET") {
-        res = await api.setKey(key, value);
-      } else {
-        res = await api.deleteKey(key);
-      }
-
-      // Try to parse JSON body
-      let parsedBody = res.body;
-      try {
-        if (typeof res.body === "string") {
-          parsedBody = JSON.parse(res.body);
-        }
-      } catch {}
-
-      const finalRes = { ...res, body: parsedBody };
-      setResponse(finalRes);
-
-      // Add to history
-      const newItem: HistoryItem = {
-        timestamp: new Date().toLocaleTimeString(),
-        action,
-        key,
-        value: action === "SET" ? value : undefined,
-        result: finalRes,
-      };
-      setHistory((prev) => [newItem, ...prev].slice(0, 50));
+      const response = await api.listKeys(currentPage, pageSize);
+      const keys: KeyData[] = response.keys.map(k => ({
+        key: k.key,
+        value: k.value,
+        size: k.size
+      }));
+      
+      setAllKeys(keys);
+      setFilteredKeys(keys);
     } catch (error) {
-      setResponse({ error: "Request failed" });
+      console.error("Failed to load keys:", error);
+      setAllKeys([]);
+      setFilteredKeys([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, pageSize]);
 
-  const handleBulkSet = async () => {
-    const keys = bulkKeys.split("\n").filter((k) => k.trim());
-    if (keys.length === 0 || !bulkValue) return;
+  // Load all keys on mount and when page changes
+  useEffect(() => {
+    loadAllKeys();
+  }, [loadAllKeys]);
 
-    setLoading(true);
-    const results = [];
-
-    for (const k of keys) {
-      try {
-        const res = await api.setKey(k.trim(), bulkValue);
-        results.push({ key: k.trim(), status: "success", result: res });
-      } catch (error) {
-        results.push({ key: k.trim(), status: "error", error });
-      }
+  // Filter keys when query changes  
+  useEffect(() => {
+    if (!query.trim()) {
+      setFilteredKeys(allKeys);
+    } else {
+      const searchTerm = query.toLowerCase();
+      setFilteredKeys(
+        allKeys.filter(k => k.key.toLowerCase().includes(searchTerm))
+      );
     }
+    setCurrentPage(1);
+  }, [query, allKeys]);
 
-    setResponse({ bulk: true, results });
-    setLoading(false);
+  const executeQuery = async () => {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+
+    setExecuting(true);
+    setQueryResult(null);
+
+    try {
+      const parts = trimmed.split(/\s+/);
+      const command = parts[0].toUpperCase();
+      const key = parts[1];
+
+      if (command === "GET" && key) {
+        const res = await api.getKey(key);
+        setQueryResult({ command: "GET", key, result: res });
+      } else if (command === "SET" && key) {
+        const value = parts.slice(2).join(" ");
+        const res = await api.setKey(key, value);
+        setQueryResult({ command: "SET", key, value, result: res });
+        loadAllKeys(); // Refresh keys
+      } else if (command === "DEL" && key) {
+        const res = await api.deleteKey(key);
+        setQueryResult({ command: "DEL", key, result: res });
+        loadAllKeys(); // Refresh keys
+      } else {
+        setQueryResult({ error: "Invalid command. Use: GET key, SET key value, or DEL key" });
+      }
+    } catch (error) {
+      setQueryResult({ error: "Query execution failed" });
+    } finally {
+      setExecuting(false);
+    }
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
+  const handleGetKey = async (key: string) => {
+    setExecuting(true);
+    try {
+      const res = await api.getKey(key);
+      const valueStr = typeof res.body === 'string' ? res.body : JSON.stringify(res.body);
+      // Update the key in the list with actual value
+      setAllKeys(prev => prev.map(k => 
+        k.key === key ? { ...k, value: valueStr, size: valueStr.length } : k
+      ));
+    } catch (error) {
+      console.error("Failed to get key:", error);
+    } finally {
+      setExecuting(false);
+    }
   };
+
+  const handleDeleteKey = async (key: string) => {
+    if (!confirm(`Delete key "${key}"?`)) return;
+    
+    setExecuting(true);
+    try {
+      await api.deleteKey(key);
+      setAllKeys(prev => prev.filter(k => k.key !== key));
+    } catch (error) {
+      console.error("Failed to delete key:", error);
+    } finally {
+      setExecuting(false);
+    }
+  };
+
+  const handleSaveEdit = async (key: string) => {
+    setExecuting(true);
+    try {
+      await api.setKey(key, editValue);
+      setAllKeys(prev => prev.map(k => 
+        k.key === key ? { ...k, value: editValue, size: editValue.length } : k
+      ));
+      setEditingKey(null);
+      setEditValue("");
+    } catch (error) {
+      console.error("Failed to update key:", error);
+    } finally {
+      setExecuting(false);
+    }
+  };
+
+  // Pagination
+  const totalPages = Math.ceil(filteredKeys.length / pageSize);
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = startIndex + pageSize;
+  const currentKeys = filteredKeys.slice(startIndex, endIndex);
 
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      {/* Request Panel */}
-      <Card className="h-[600px] flex flex-col">
+    <div className="space-y-4">
+      {/* Query Input */}
+      <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Database className="h-5 w-5" />
-            Data Operations
+            Query
           </CardTitle>
         </CardHeader>
-        <CardContent className="flex-1 flex flex-col space-y-4">
-          <Tabs defaultValue="single" className="flex-1 flex flex-col">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="single">Single Operation</TabsTrigger>
-              <TabsTrigger value="bulk">Bulk Operations</TabsTrigger>
-            </TabsList>
-            
-            <TabsContent value="single" className="flex-1 flex flex-col space-y-4">
-              <div className="space-y-2">
-                <Input
-                  placeholder="Key"
-                  value={key}
-                  onChange={(e) => setKey(e.target.value)}
-                />
-                <Textarea
-                  placeholder="Value (for SET operations)"
-                  value={value}
-                  onChange={(e) => setValue(e.target.value)}
-                  rows={4}
-                />
-              </div>
-              <div className="flex gap-2">
-                <Button onClick={() => handleAction("GET")} disabled={loading} className="flex-1">
-                  GET
-                </Button>
-                <Button onClick={() => handleAction("SET")} variant="secondary" disabled={loading} className="flex-1">
-                  SET
-                </Button>
-                <Button onClick={() => handleAction("DEL")} variant="destructive" disabled={loading} className="flex-1">
-                  DELETE
-                </Button>
-              </div>
-              
-              <div className="flex-1 flex flex-col">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium">Response</span>
-                  {response && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => copyToClipboard(JSON.stringify(response, null, 2))}
-                    >
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-                <div className="flex-1 rounded-md border bg-muted p-4 overflow-auto font-mono text-sm">
-                  {loading ? (
-                    <div className="flex items-center justify-center h-full">
-                      <Loader2 className="h-6 w-6 animate-spin" />
-                    </div>
-                  ) : (
-                    <pre className="text-xs">{JSON.stringify(response, null, 2)}</pre>
-                  )}
-                </div>
-              </div>
-            </TabsContent>
-            
-            <TabsContent value="bulk" className="flex-1 flex flex-col space-y-4">
-              <div className="space-y-2">
-                <Textarea
-                  placeholder="Keys (one per line)"
-                  value={bulkKeys}
-                  onChange={(e) => setBulkKeys(e.target.value)}
-                  rows={6}
-                />
-                <Input
-                  placeholder="Value to set for all keys"
-                  value={bulkValue}
-                  onChange={(e) => setBulkValue(e.target.value)}
-                />
-              </div>
-              <Button onClick={handleBulkSet} disabled={loading} className="w-full">
-                <Plus className="h-4 w-4 mr-2" />
-                Bulk SET
-              </Button>
-              
-              <div className="flex-1 rounded-md border bg-muted p-4 overflow-auto font-mono text-sm">
-                {loading ? (
-                  <div className="flex items-center justify-center h-full">
-                    <Loader2 className="h-6 w-6 animate-spin" />
-                  </div>
-                ) : (
-                  <pre className="text-xs">{JSON.stringify(response, null, 2)}</pre>
-                )}
-              </div>
-            </TabsContent>
-          </Tabs>
+        <CardContent className="space-y-4">
+          <div className="flex gap-2">
+            <Input
+              placeholder='Enter query: "GET key1" or "SET key1 value" or "DEL key1"'
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  executeQuery();
+                }
+              }}
+              className="font-mono"
+            />
+            <Button onClick={executeQuery} disabled={executing || !query.trim()}>
+              <Play className="h-4 w-4 mr-2" />
+              Execute
+            </Button>
+          </div>
+          
+          {queryResult && (
+            <div className="rounded-md border bg-muted p-4">
+              <pre className="text-xs font-mono overflow-auto">
+                {JSON.stringify(queryResult, null, 2)}
+              </pre>
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      {/* History Panel */}
-      <Card className="h-[600px] flex flex-col">
+      {/* All Keys Table */}
+      <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle>History</CardTitle>
-            <Button variant="ghost" size="sm" onClick={() => setHistory([])}>
-              <Trash2 className="h-4 w-4" />
+            <CardTitle className="flex items-center gap-2">
+              <Database className="h-5 w-5" />
+              Documents
+              <Badge variant="outline">{filteredKeys.length}</Badge>
+            </CardTitle>
+            <Button variant="outline" size="sm" onClick={loadAllKeys} disabled={loading}>
+              <Loader2 className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+              Refresh
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="flex-1 overflow-hidden p-0">
-          <ScrollArea className="h-full px-6">
-            <div className="space-y-2 pb-4">
-              {history.map((item, i) => (
-                <div
-                  key={i}
-                  className="flex flex-col gap-1 rounded-lg border p-3 text-sm hover:bg-muted/50 cursor-pointer transition-colors"
-                  onClick={() => {
-                    setKey(item.key);
-                    setValue(item.value || "");
-                    setResponse(item.result);
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <span
-                      className={`font-bold ${
-                        item.action === "GET"
-                          ? "text-blue-500"
-                          : item.action === "SET"
-                          ? "text-green-500"
-                          : "text-red-500"
-                      }`}
-                    >
-                      {item.action}
-                    </span>
-                    <span className="text-xs text-muted-foreground">{item.timestamp}</span>
-                  </div>
-                  <div className="font-mono truncate">{item.key}</div>
-                  {item.value && (
-                    <div className="text-xs text-muted-foreground truncate">{item.value}</div>
-                  )}
-                </div>
-              ))}
-              {history.length === 0 && (
-                <div className="text-center text-muted-foreground py-8">No history yet</div>
-              )}
+        <CardContent>
+          {loading ? (
+            <div className="flex items-center justify-center h-64">
+              <Loader2 className="h-8 w-8 animate-spin" />
             </div>
-          </ScrollArea>
+          ) : filteredKeys.length === 0 ? (
+            <div className="text-center text-muted-foreground py-12">
+              <Database className="h-12 w-12 mx-auto mb-4 opacity-20" />
+              <p>No keys found</p>
+              <p className="text-xs mt-2">Use the query field above to add data</p>
+            </div>
+          ) : (
+            <>
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[300px]">Key</TableHead>
+                      <TableHead>Value</TableHead>
+                      <TableHead className="w-[100px]">Size</TableHead>
+                      <TableHead className="w-[150px] text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {currentKeys.map((item) => (
+                      <TableRow key={item.key}>
+                        <TableCell className="font-mono text-sm font-medium">
+                          {item.key}
+                        </TableCell>
+                        <TableCell>
+                          {editingKey === item.key ? (
+                            <Textarea
+                              value={editValue}
+                              onChange={(e) => setEditValue(e.target.value)}
+                              rows={3}
+                              className="font-mono text-xs"
+                            />
+                          ) : (
+                            <div className="font-mono text-xs text-muted-foreground truncate max-w-md">
+                              {item.value}
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {item.size > 0 ? `${item.size}B` : "-"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex gap-1 justify-end">
+                            {editingKey === item.key ? (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleSaveEdit(item.key)}
+                                  disabled={executing}
+                                >
+                                  Save
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    setEditingKey(null);
+                                    setEditValue("");
+                                  }}
+                                >
+                                  Cancel
+                                </Button>
+                              </>
+                            ) : (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleGetKey(item.key)}
+                                  disabled={executing}
+                                >
+                                  View
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    setEditingKey(item.key);
+                                    setEditValue(item.value);
+                                  }}
+                                >
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleDeleteKey(item.key)}
+                                  disabled={executing}
+                                >
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between mt-4">
+                  <div className="text-sm text-muted-foreground">
+                    Showing {startIndex + 1}-{Math.min(endIndex, filteredKeys.length)} of {filteredKeys.length}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                      disabled={currentPage === 1}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <div className="flex items-center gap-1">
+                      <span className="text-sm">
+                        Page {currentPage} of {totalPages}
+                      </span>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                      disabled={currentPage === totalPages}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </CardContent>
       </Card>
     </div>

@@ -110,6 +110,11 @@ func (s *NodeService) GetCurrentNodeUrl() string {
 	return s.currentNodeUrl
 }
 
+// GetStore returns the underlying store for direct access.
+func (s *NodeService) GetStore() *Store {
+	return s.store
+}
+
 // HandleGet handles a GET request, routing if necessary.
 func (s *NodeService) HandleGet(key string) (*GetResponse, error) {
 	targetUrl := s.ring.GetNode(key)

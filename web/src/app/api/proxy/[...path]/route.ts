@@ -5,7 +5,11 @@ const API_BASE = `${SEED_URL}/api/v1`;
 
 async function proxyRequest(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
-  const url = `${API_BASE}/${path.join("/")}`;
+  
+  // Build URL with query parameters
+  const searchParams = req.nextUrl.searchParams.toString();
+  const queryString = searchParams ? `?${searchParams}` : '';
+  const url = `${API_BASE}/${path.join("/")}${queryString}`;
   
   try {
     const options: RequestInit = {

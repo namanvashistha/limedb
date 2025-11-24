@@ -9,10 +9,20 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useState } from "react";
 import { Settings as SettingsIcon, Save } from "lucide-react";
 
-export function SettingsPanel() {
-  const [refreshInterval, setRefreshInterval] = useState("2000");
-  const [autoRefresh, setAutoRefresh] = useState(true);
-  const [seedUrl, setSeedUrl] = useState("http://192.168.0.124:8484");
+interface SettingsPanelProps {
+  refreshInterval: number;
+  setRefreshInterval: (value: number) => void;
+  autoRefresh: boolean;
+  setAutoRefresh: (value: boolean) => void;
+}
+
+export function SettingsPanel({ 
+  refreshInterval, 
+  setRefreshInterval, 
+  autoRefresh, 
+  setAutoRefresh 
+}: SettingsPanelProps) {
+  const [seedUrl, setSeedUrl] = useState("http://192.168.1.124:8484");
 
   const handleSave = () => {
     // Save settings to localStorage
@@ -46,8 +56,11 @@ export function SettingsPanel() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="refresh-interval">Refresh Interval (ms)</Label>
-              <Select value={refreshInterval} onValueChange={setRefreshInterval}>
+              <Label htmlFor="refresh-interval">Refresh Interval</Label>
+              <Select 
+                value={refreshInterval.toString()} 
+                onValueChange={(value) => setRefreshInterval(parseInt(value))}
+              >
                 <SelectTrigger id="refresh-interval">
                   <SelectValue />
                 </SelectTrigger>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import Image from "next/image";
 import { SummaryCards } from "@/components/dashboard/SummaryCards";
 import { ClusterStatusTable } from "@/components/dashboard/ClusterStatusTable";
 import { RingVisualizer } from "@/components/dashboard/RingVisualizer";
@@ -33,6 +34,10 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [connectionStatus, setConnectionStatus] = useState<"connected" | "disconnected" | "connecting">("connecting");
+  
+  // Settings state
+  const [refreshInterval, setRefreshInterval] = useState(2000);
+  const [autoRefresh, setAutoRefresh] = useState(true);
 
   const fetchData = async () => {
     setLoading(true);
@@ -67,9 +72,11 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 2000);
+    if (!autoRefresh) return;
+    
+    const interval = setInterval(fetchData, refreshInterval);
     return () => clearInterval(interval);
-  }, []);
+  }, [refreshInterval, autoRefresh]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -121,16 +128,24 @@ export default function Dashboard() {
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.5 }}
+              className="flex items-center gap-4"
             >
-              <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-lime-500 via-green-500 to-emerald-500 bg-clip-text text-transparent">
-                LimeDB Dashboard
-              </h1>
-              <p className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
-                Cluster Monitoring & Management Console
-                <Badge variant={connectionStatus === "connected" ? "default" : "destructive"} className="text-xs">
-                  {connectionStatus}
-                </Badge>
-              </p>
+              <Image 
+                src="/logo.png" 
+                alt="LimeDB Logo" 
+                width={180} 
+                height={40}
+                className="h-10 w-auto"
+                priority
+              />
+              <div>
+                <p className="text-sm text-muted-foreground flex items-center gap-2">
+                  
+                  <Badge variant={connectionStatus === "connected" ? "default" : "destructive"} className="text-xs">
+                    {connectionStatus}
+                  </Badge>
+                </p>
+              </div>
             </motion.div>
             <div className="flex items-center gap-3">
               <motion.div
@@ -253,7 +268,12 @@ export default function Dashboard() {
                 </TabsContent>
                 
                 <TabsContent value="settings" className="mt-0">
-                  <SettingsPanel />
+                  <SettingsPanel 
+                    refreshInterval={refreshInterval}
+                    setRefreshInterval={setRefreshInterval}
+                    autoRefresh={autoRefresh}
+                    setAutoRefresh={setAutoRefresh}
+                  />
                 </TabsContent>
               </motion.div>
             </AnimatePresence>

@@ -150,6 +150,8 @@ func (s *Server) router(ctx *fasthttp.RequestCtx) {
 		s.handleSet(ctx)
 	case method == "DELETE" && len(path) > 12 && path[:12] == "/api/v1/del/":
 		s.handleDelete(ctx, path[12:])
+	case method == "GET" && path == "/api/v1/keys":
+		s.handleListKeys(ctx)
 	case method == "GET" && path == "/api/v1/cluster/state":
 		s.handleClusterState(ctx)
 	case method == "GET" && path == "/api/v1/cluster/ring":
@@ -291,6 +293,72 @@ func (s *Server) handleGossipMetrics(ctx *fasthttp.RequestCtx) {
 
 	metrics := s.gossiper.GetGossipMetrics()
 	body, _ := json.Marshal(metrics)
+	ctx.SetContentType("application/json")
+	ctx.SetBody(body)
+}
+
+func (s *Server) handleListKeys(ctx *fasthttp.RequestCtx) {
+	// Get query parameters for pagination
+	args := ctx.QueryArgs()
+	page := args.GetUintOrZero("page")
+	if page == 0 {
+		page = 1
+	}
+	pageSize := args.GetUintOrZero("pageSize")
+	if pageSize == 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100 // Max page size
+	}
+
+	// Get all keys from local store (sorted)
+	store := s.service.GetStore()
+	allKeys := store.ListKeys()
+	totalKeys := len(allKeys)
+
+	// Calculate pagination
+	startIndex := int((page - 1) * pageSize)
+	endIndex := int(startIndex) + int(pageSize)
+	if startIndex >= totalKeys {
+		startIndex = 0
+		endIndex = 0
+	}
+	if endIndex > totalKeys {
+		endIndex = totalKeys
+	}
+
+	// Get paginated keys
+	paginatedKeys := allKeys[startIndex:endIndex]
+
+	// Build response with key details
+	type KeyInfo struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+		Size  int    `json:"size"`
+	}
+
+	keyInfos := make([]KeyInfo, 0, len(paginatedKeys))
+	for _, key := range paginatedKeys {
+		value, ok := store.Get(key)
+		if ok {
+			keyInfos = append(keyInfos, KeyInfo{
+				Key:   key,
+				Value: value,
+				Size:  len(value),
+			})
+		}
+	}
+
+	response := map[string]interface{}{
+		"keys":       keyInfos,
+		"total":      totalKeys,
+		"page":       page,
+		"pageSize":   pageSize,
+		"totalPages": (totalKeys + int(pageSize) - 1) / int(pageSize),
+	}
+
+	body, _ := json.Marshal(response)
 	ctx.SetContentType("application/json")
 	ctx.SetBody(body)
 }

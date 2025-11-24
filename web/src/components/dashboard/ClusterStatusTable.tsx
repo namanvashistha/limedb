@@ -18,11 +18,11 @@ interface ClusterStatusTableProps {
 export function ClusterStatusTable({ nodes }: ClusterStatusTableProps) {
   const nodesList = Object.values(nodes);
   
-  // Sort so self node appears first
+  // Sort: self node first, then by URL alphabetically
   const sortedNodes = nodesList.sort((a, b) => {
     if (a.isSelf) return -1;
     if (b.isSelf) return 1;
-    return 0;
+    return a.nodeUrl.localeCompare(b.nodeUrl);
   });
   
   if (sortedNodes.length === 0) {

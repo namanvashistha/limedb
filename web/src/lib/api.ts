@@ -93,6 +93,18 @@ class ClusterClient {
     return res.json();
   }
 
+  async listKeys(page: number = 1, pageSize: number = 20): Promise<{
+    keys: Array<{ key: string; value: string; size: number }>;
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+  }> {
+    const res = await fetch(`${BASE_URL}/keys?page=${page}&pageSize=${pageSize}`);
+    if (!res.ok) throw new Error("Failed to fetch keys");
+    return res.json();
+  }
+
   async getKey(key: string): Promise<KeyValueResponse> {
     const res = await fetch(`${BASE_URL}/get/${key}`);
     const body = await res.text();

@@ -102,7 +102,9 @@ export function GossipViewer({ gossip }: GossipViewerProps) {
             </TableHeader>
             <TableBody>
               {gossip.peer_details && gossip.peer_details.length > 0 ? (
-                gossip.peer_details.map((peer, idx) => (
+                [...gossip.peer_details]
+                  .sort((a, b) => a.url.localeCompare(b.url))
+                  .map((peer, idx) => (
                   <TableRow key={idx}>
                     <TableCell className="font-medium">{peer.url}</TableCell>
                     <TableCell>
