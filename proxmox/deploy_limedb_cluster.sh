@@ -7,7 +7,7 @@
 set -e
 
 # Configuration
-NUM_NODES=${1:-3}  # Default to 3 nodes if not specified
+NUM_NODES="${NUM_NODES:-2}" # Default to 3 nodes if not specified
 BASE_PORT=8484
 SEED_NODE_IP=""
 SEED_NODE_URL=""
