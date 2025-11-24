@@ -50,6 +50,33 @@ GRAFANA_OTLP_ENDPOINT="${GRAFANA_OTLP_ENDPOINT:-}"
 GRAFANA_CLOUD_USERNAME="${GRAFANA_CLOUD_USERNAME:-}"
 GRAFANA_CLOUD_PASSWORD="${GRAFANA_CLOUD_PASSWORD:-}"
 
+# Parse command-line arguments
+CLUSTER_PEERS=""
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --peers)
+            CLUSTER_PEERS="$2"
+            shift 2
+            ;;
+        --help|-h)
+            echo "Usage: $0 [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --peers URLS    Comma-separated list of peer URLs (e.g., http://ip1:8484,http://ip2:8484)"
+            echo "  --help, -h      Show this help message"
+            echo ""
+            echo "Example:"
+            echo "  $0 --peers http://192.168.1.101:8484,http://192.168.1.102:8484"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
+
 # Functions
 function msg_info() {
     local msg="$1"
@@ -363,7 +390,6 @@ fi
 # Simple peer configuration
 echo ""
 echo -e "${YW}Cluster Configuration${CL}"
-read -p "Enter peer URLs (comma-separated, or press Enter for standalone): " CLUSTER_PEERS
 if [[ -n "$CLUSTER_PEERS" ]]; then
     # Remove self from peers if present
     CLUSTER_PEERS=$(echo "$CLUSTER_PEERS" | sed "s|http://$CONTAINER_IP:8484||g" | sed 's/,,/,/g' | sed 's/^,//;s/,$//')
@@ -372,6 +398,9 @@ if [[ -n "$CLUSTER_PEERS" ]]; then
     else
         echo -e "${CM} ${GN}Cluster peers: $CLUSTER_PEERS${CL}"
     fi
+else
+    echo -e "${INFO} ${BL}No peers specified. Running in standalone mode.${CL}"
+    echo -e "${DGN}Tip: Use --peers flag to configure cluster peers${CL}"
 fi
 
 echo -ne " ${YW}Installing LimeDB + OTEL Collector (all steps)...${CL}"

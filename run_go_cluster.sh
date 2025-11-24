@@ -47,13 +47,13 @@ for ((i=0; i<NUM_NODES; i++)); do
     if [ $i -eq 0 ]; then
         # First node starts without peers (seed node)
         echo "Starting Seed Node at ${NODE_URL}..."
-        $BINARY_PATH -server.port $PORT -node.url "$NODE_URL" -node.routing.virtual-nodes 1 &
+        $BINARY_PATH -server.port $PORT -node.url "$NODE_URL" -node.routing.virtual-nodes 1 -otel.endpoint "" &
     else
         # Each node connects to the previous node
         PREV_PORT=$((START_PORT + i - 1))
         PREV_PEER="http://localhost:${PREV_PORT}"
         echo "Starting Node at ${NODE_URL} with peer ${PREV_PEER}..."
-        $BINARY_PATH -server.port $PORT -node.url "$NODE_URL" -node.peers "$PREV_PEER"  -node.routing.virtual-nodes 1 &
+        $BINARY_PATH -server.port $PORT -node.url "$NODE_URL" -node.peers "$PREV_PEER"  -node.routing.virtual-nodes 1 -otel.endpoint "" &
     fi
     PIDS+=($!)
 done

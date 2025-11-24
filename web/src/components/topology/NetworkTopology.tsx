@@ -1,16 +1,18 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
-import {
-  ReactFlow,
-  Node,
-  Edge,
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { 
+  ReactFlow, 
+  Node, 
+  Edge, 
+  useNodesState, 
+  useEdgesState, 
+  Controls, 
+  MiniMap, 
   Background,
-  Controls,
-  MiniMap,
-  useNodesState,
-  useEdgesState,
   MarkerType,
+  applyNodeChanges,
+  NodeChange,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,10 +26,17 @@ const nodeTypes: NodeTypes = {
   cluster: ClusterNode as any,
 };
 
+type LayoutType = "circle" | "grid" | "force";
+
 export function NetworkTopology() {
   const [nodes, setNodes] = useNodesState<Node<ClusterNodeData>>([]);
   const [edges, setEdges] = useEdgesState<Edge>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [layoutType, setLayoutType] = useState<LayoutType>("circle");
+  
+  // Track manually positioned nodes to preserve their positions across refreshes
+  const manualPositions = useRef<Map<string, { x: number; y: number }>>(new Map());
 
   useEffect(() => {
     const fetchTopology = async () => {
@@ -35,20 +44,51 @@ export function NetworkTopology() {
         // Fetch initial gossip from seed
         const seedGossip = await api.getGossipMetrics();
         
-        // Build list of all nodes
-        const allNodeUrls = [seedGossip.node_url, ...seedGossip.peer_details.map(p => p.url)];
+        // Discover all nodes recursively by following peer references
+        const discoveredNodes = new Set<string>([seedGossip.node_url]);
+        const toFetch = new Set<string>([seedGossip.node_url]);
+        const gossipData = new Map<string, any>();
         
-        // Fetch gossip from each node
-        const gossipPromises = allNodeUrls.map(async (nodeUrl) => {
-          try {
-            const gossip = await api.getGossipMetrics(nodeUrl);
-            return { nodeUrl, gossip, success: true };
-          } catch (err) {
-            return { nodeUrl, gossip: null, success: false };
-          }
+        // Add seed's peers to discovery
+        seedGossip.peer_details.forEach(p => {
+          discoveredNodes.add(p.url);
+          toFetch.add(p.url);
         });
         
-        const gossipResults = await Promise.all(gossipPromises);
+        // Fetch from all discovered nodes (iteratively discover more)
+        while (toFetch.size > 0) {
+          const batch = Array.from(toFetch);
+          toFetch.clear();
+          
+          const batchPromises = batch.map(async (nodeUrl) => {
+            try {
+              const gossip = await api.getGossipMetrics(nodeUrl);
+              gossipData.set(nodeUrl, { gossip, success: true });
+              
+              // Discover any new peers mentioned by this node
+              gossip.peer_details.forEach(p => {
+                if (!discoveredNodes.has(p.url)) {
+                  discoveredNodes.add(p.url);
+                  toFetch.add(p.url);
+                }
+              });
+            } catch (err) {
+              gossipData.set(nodeUrl, { gossip: null, success: false });
+            }
+          });
+          
+          await Promise.all(batchPromises);
+        }
+        
+        // Convert to the expected format
+        const gossipResults = Array.from(discoveredNodes).map(nodeUrl => {
+          const data = gossipData.get(nodeUrl);
+          return {
+            nodeUrl,
+            gossip: data?.gossip || null,
+            success: data?.success || false,
+          };
+        });
         
         // Sort nodes alphabetically by URL for consistent positioning
         gossipResults.sort((a, b) => a.nodeUrl.localeCompare(b.nodeUrl));
@@ -58,14 +98,39 @@ export function NetworkTopology() {
         const edgeMap = new Map<string, { from: string; to: string; bidirectional: boolean }>();
         
         gossipResults.forEach(({ nodeUrl, gossip, success }, index) => {
-          // Calculate circular position
+          // Calculate position based on layout type
           const totalNodes = gossipResults.length;
-          const radius = 250; // Distance from center
-          const centerX = 400;
-          const centerY = 300;
-          const angle = (index * 2 * Math.PI) / totalNodes - Math.PI / 2; // Start from top
-          const x = centerX + radius * Math.cos(angle);
-          const y = centerY + radius * Math.sin(angle);
+          let calculatedX = 0;
+          let calculatedY = 0;
+          
+          if (layoutType === "circle") {
+            // Circular layout
+            const radius = 350;
+            const centerX = 500;
+            const centerY = 400;
+            const angle = (index * 2 * Math.PI) / totalNodes - Math.PI / 2;
+            calculatedX = centerX + radius * Math.cos(angle);
+            calculatedY = centerY + radius * Math.sin(angle);
+          } else if (layoutType === "grid") {
+            // Grid layout
+            const cols = Math.ceil(Math.sqrt(totalNodes));
+            const row = Math.floor(index / cols);
+            const col = index % cols;
+            calculatedX = 150 + col * 300;
+            calculatedY = 150 + row * 250;
+          } else if (layoutType === "force") {
+            // Simple force-directed (spread out evenly)
+            const cols = Math.ceil(Math.sqrt(totalNodes));
+            const row = Math.floor(index / cols);
+            const col = index % cols;
+            calculatedX = 200 + col * 250 + (Math.random() * 50 - 25);
+            calculatedY = 200 + row * 220 + (Math.random() * 50 - 25);
+          }
+          
+          // Use manual position if available, otherwise use calculated position
+          const manualPos = manualPositions.current.get(nodeUrl);
+          const x = manualPos?.x ?? calculatedX;
+          const y = manualPos?.y ?? calculatedY;
           
           if (success && gossip) {
             // Create node
@@ -83,10 +148,11 @@ export function NetworkTopology() {
               type: "cluster",
               position: { x, y },
               data: nodeData,
+              className: selectedNodeId && selectedNodeId !== nodeUrl ? "opacity-30" : "",
             });
             
             // Create edges from this node to its peers
-            gossip.peer_details.forEach((peer) => {
+            gossip.peer_details.forEach((peer: any) => {
               const edgeKey = [nodeUrl, peer.url].sort().join("--");
               
               if (edgeMap.has(edgeKey)) {
@@ -116,6 +182,7 @@ export function NetworkTopology() {
                 lag: 0,
                 isSeed: nodeUrl === seedGossip.node_url,
               },
+              className: selectedNodeId && selectedNodeId !== nodeUrl ? "opacity-30" : "",
             });
           }
         });
@@ -176,6 +243,10 @@ export function NetworkTopology() {
             targetHandle = handles.target;
           }
           
+          // Determine if this edge is connected to the selected node
+          const isConnected = selectedNodeId ? (from === selectedNodeId || to === selectedNodeId) : false;
+          const isDimmed = selectedNodeId && !isConnected;
+          
           newEdges.push({
             id: key,
             source: from,
@@ -183,15 +254,21 @@ export function NetworkTopology() {
             sourceHandle,
             targetHandle,
             type: "default", // Curvy bezier lines
-            animated: !bidirectional, // Only animate one-way connections
+            animated: !bidirectional, // Always animate one-way connections
             style: {
-              stroke: bidirectional ? "#84cc16" : "#eab308",
-              strokeWidth: bidirectional ? 2.5 : 2,
-              strokeDasharray: bidirectional ? "5,5" : undefined, // Dashed for bidirectional
+              stroke: isConnected 
+                ? (bidirectional ? "#84cc16" : "#eab308") 
+                : (bidirectional ? "#84cc16" : "#eab308"),
+              strokeWidth: isConnected 
+                ? (bidirectional ? 4 : 3.5) 
+                : (bidirectional ? 2.5 : 2),
+              strokeDasharray: bidirectional ? "5,5" : undefined,
+              opacity: isDimmed ? 0.15 : 1,
+              filter: isConnected ? "drop-shadow(0 0 4px rgba(132, 204, 22, 0.6))" : undefined,
             },
             markerEnd: bidirectional ? undefined : {
               type: MarkerType.ArrowClosed,
-              color: "#eab308",
+              color: isConnected ? "#eab308" : "#eab308",
             },
           });
         });
@@ -208,7 +285,21 @@ export function NetworkTopology() {
     fetchTopology();
     const interval = setInterval(fetchTopology, 5000);
     return () => clearInterval(interval);
-  }, [setNodes, setEdges]);
+  }, [setNodes, setEdges, selectedNodeId, layoutType]); // Re-run when selection or layout changes
+
+  const handleLayoutChange = useCallback((newLayout: LayoutType) => {
+    setLayoutType(newLayout);
+    // Clear manual positions when switching layouts
+    manualPositions.current.clear();
+  }, []);
+
+  const handleNodeClick = useCallback((_event: React.MouseEvent, node: Node) => {
+    setSelectedNodeId(current => current === node.id ? null : node.id);
+  }, []);
+
+  const handlePaneClick = useCallback(() => {
+    setSelectedNodeId(null);
+  }, []);
 
   const edgeTypeCounts = useMemo(() => {
     const bidirectional = edges.filter(e => !e.animated).length; // Bidirectional are NOT animated
@@ -240,7 +331,45 @@ export function NetworkTopology() {
             <Network className="h-5 w-5" />
             Network Topology
           </CardTitle>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-4">
+            {/* Layout Selector */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Layout:</span>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => handleLayoutChange("circle")}
+                  className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                    layoutType === "circle"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted hover:bg-muted/80"
+                  }`}
+                >
+                  Circle
+                </button>
+                <button
+                  onClick={() => handleLayoutChange("grid")}
+                  className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                    layoutType === "grid"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted hover:bg-muted/80"
+                  }`}
+                >
+                  Grid
+                </button>
+                <button
+                  onClick={() => handleLayoutChange("force")}
+                  className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                    layoutType === "force"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted hover:bg-muted/80"
+                  }`}
+                >
+                  Force
+                </button>
+              </div>
+            </div>
+            
+            {/* Edge Stats */}
             <div className="flex items-center gap-2">
               <Badge variant="outline" className="gap-1">
                 <ArrowLeftRight className="h-3 w-3 text-green-600" />
@@ -260,20 +389,15 @@ export function NetworkTopology() {
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
-            onNodesChange={(changes) => {
-              // Allow dragging by applying node changes
-              setNodes((nds) => {
-                const updated = [...nds];
-                changes.forEach((change) => {
-                  if (change.type === 'position' && change.dragging) {
-                    const node = updated.find(n => n.id === change.id);
-                    if (node && change.position) {
-                      node.position = change.position;
-                    }
-                  }
-                });
-                return updated;
+            onNodesChange={(changes: NodeChange[]) => {
+              // Track manual position changes
+              changes.forEach((change) => {
+                if (change.type === 'position' && change.position && !change.dragging) {
+                  // Position change completed (dragging finished)
+                  manualPositions.current.set(change.id, change.position);
+                }
               });
+              setNodes((nds) => applyNodeChanges(changes, nds) as Node<ClusterNodeData>[]);
             }}
             fitView
             minZoom={0.5}
@@ -281,6 +405,8 @@ export function NetworkTopology() {
             nodesDraggable={true}
             nodesConnectable={false}
             elementsSelectable={true}
+            onNodeClick={handleNodeClick}
+            onPaneClick={handlePaneClick}
             defaultEdgeOptions={{
               animated: false,
             }}
@@ -297,25 +423,60 @@ export function NetworkTopology() {
           </ReactFlow>
         </div>
         
-        {/* Legend */}
-        <div className="absolute bottom-4 left-4 bg-background/95 backdrop-blur-sm border rounded-lg p-3 shadow-lg text-xs space-y-2">
-          <div className="font-semibold mb-2">Legend</div>
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-0.5 bg-green-500"></div>
-            <span>Bidirectional (mutual peers)</span>
+        {/* Enhanced Legend */}
+        <div className="absolute bottom-4 left-4 bg-background/95 backdrop-blur-sm border rounded-lg p-4 shadow-lg text-xs max-w-xs">
+          <div className="font-semibold text-sm mb-3 flex items-center gap-2">
+            <Network className="h-4 w-4" />
+            Legend
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-0.5 bg-yellow-500"></div>
-            <ArrowRight className="h-3 w-3 text-yellow-600" />
-            <span>One-way (asymmetric)</span>
+          
+          {/* Connections Section */}
+          <div className="space-y-2 mb-3 pb-3 border-b">
+            <div className="text-muted-foreground font-medium mb-1.5">Connections</div>
+            <div className="flex items-center gap-2">
+              <div className="relative w-10 h-0.5 bg-green-500">
+                <div className="absolute inset-0 bg-green-500 opacity-50 animate-pulse"></div>
+              </div>
+              <span className="flex-1">Bidirectional gossip</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="relative w-10">
+                <svg width="40" height="8" viewBox="0 0 40 8">
+                  <defs>
+                    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+                      <path d="M0,0 L0,6 L9,3 z" fill="#eab308" />
+                    </marker>
+                  </defs>
+                  <line x1="0" y1="4" x2="36" y2="4" stroke="#eab308" strokeWidth="2" markerEnd="url(#arrow)">
+                    <animate attributeName="stroke-dashoffset" from="0" to="100" dur="2s" repeatCount="indefinite" />
+                  </line>
+                </svg>
+              </div>
+              <span className="flex-1">One-way gossip</span>
+            </div>
+            <div className="text-[10px] text-muted-foreground italic mt-1 pl-12">
+              Click a node to highlight its connections
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-            <span>Active node</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-            <span>Dead node</span>
+          
+          {/* Node Status Section */}
+          <div className="space-y-2">
+            <div className="text-muted-foreground font-medium mb-1.5">Node Status</div>
+            <div className="flex items-center gap-2">
+              <div className="relative w-3 h-3">
+                <div className="absolute inset-0 bg-green-500 rounded-full animate-ping opacity-75"></div>
+                <div className="relative w-3 h-3 bg-green-500 rounded-full"></div>
+              </div>
+              <span className="flex-1">Active</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
+              <span className="flex-1">Stale</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+              <span className="flex-1">Dead</span>
+            </div>
           </div>
         </div>
       </CardContent>
