@@ -21,34 +21,35 @@ import { ConnectionDialog } from "@/components/dashboard/ConnectionDialog";
 interface DashboardLayoutProps {
   children: React.ReactNode;
   activeTab: string;
-  onTabChange: (tab: string) => void;
+  setActiveTab: (tab: string) => void;
   headerAction?: React.ReactNode;
 }
 
 export function DashboardLayout({ 
   children, 
   activeTab, 
-  onTabChange,
+  setActiveTab,
   headerAction 
 }: DashboardLayoutProps) {
   const [open, setOpen] = useState(false);
 
   const sidebarItems = [
     {
-      title: "Monitoring",
+      title: "Cluster",
       items: [
-        { id: "overview", label: "Cluster Overview", icon: LayoutDashboard },
-        { id: "metrics", label: "Network & Analytics", icon: Activity },
+        { id: "overview", label: "Overview", icon: LayoutDashboard },
+        { id: "nodes", label: "Nodes", icon: Server },
+        { id: "metrics", label: "Topology", icon: Network },
       ]
     },
     {
-      title: "Data Operations",
+      title: "Data",
       items: [
-        { id: "explorer", label: "Key-Value Explorer", icon: Database },
+        { id: "explorer", label: "Explorer", icon: Database },
       ]
     },
     {
-      title: "Configuration",
+      title: "System",
       items: [
         { id: "settings", label: "Settings", icon: Settings },
       ]
@@ -82,7 +83,7 @@ export function DashboardLayout({
                       activeTab === item.id && "bg-secondary"
                     )}
                     onClick={() => {
-                      onTabChange(item.id);
+                      setActiveTab(item.id);
                       setOpen(false);
                     }}
                   >

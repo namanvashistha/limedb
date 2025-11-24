@@ -10,28 +10,18 @@ import { useState, useEffect } from "react";
 import { Settings as SettingsIcon, Save } from "lucide-react";
 import { api } from "@/lib/api";
 
-interface SettingsPanelProps {
-  refreshInterval: number;
-  setRefreshInterval: (value: number) => void;
-  autoRefresh: boolean;
-  setAutoRefresh: (value: boolean) => void;
-}
-
-export function SettingsPanel({ 
-  refreshInterval, 
-  setRefreshInterval, 
-  autoRefresh, 
-  setAutoRefresh 
-}: SettingsPanelProps) {
+export function SettingsPanel() {
+  const [refreshInterval, setRefreshInterval] = useState(2000);
+  const [autoRefresh, setAutoRefresh] = useState(true);
   const [seedUrl, setSeedUrl] = useState("http://localhost:8484");
 
   useEffect(() => {
     const savedSettings = localStorage.getItem("limedb_settings");
     if (savedSettings) {
       const settings = JSON.parse(savedSettings);
-      if (settings.seedUrl) {
-        setSeedUrl(settings.seedUrl);
-      }
+      if (settings.seedUrl) setSeedUrl(settings.seedUrl);
+      if (settings.refreshInterval) setRefreshInterval(settings.refreshInterval);
+      if (settings.autoRefresh !== undefined) setAutoRefresh(settings.autoRefresh);
     }
   }, []);
 

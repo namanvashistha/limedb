@@ -1,149 +1,221 @@
 "use client";
 
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
+import {
+  ReactFlow,
+  Node,
+  Edge,
+  Background,
+  Controls,
+  MiniMap,
+  useNodesState,
+  useEdgesState,
+  MarkerType,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { NodeStatus } from "@/lib/types";
-import { Network } from "lucide-react";
-import dynamic from "next/dynamic";
+import { Badge } from "@/components/ui/badge";
+import { Network, ArrowLeftRight, ArrowRight } from "lucide-react";
+import { api } from "@/lib/api";
+import { ClusterNode, ClusterNodeData } from "./ClusterNode";
+import type { NodeTypes } from "@xyflow/react";
 
-const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), { ssr: false });
+const nodeTypes: NodeTypes = {
+  cluster: ClusterNode as any,
+};
 
-interface NetworkTopologyProps {
-  nodes: Record<string, NodeStatus>;
-}
-
-interface GraphNode {
-  id: string;
-  name: string;
-  val: number;
-  color: string;
-  status: string;
-  x?: number;
-  y?: number;
-  vx?: number;
-  vy?: number;
-}
-
-interface GraphLink {
-  source: string;
-  target: string;
-  color: string;
-}
-
-export function NetworkTopology({ nodes }: NetworkTopologyProps) {
-  const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; links: GraphLink[] }>({
-    nodes: [],
-    links: [],
-  });
-  const [dimensions, setDimensions] = useState({ width: 800, height: 500 });
-  const containerRef = useRef<HTMLDivElement>(null);
-  const fgRef = useRef<any>(null);
-  const prevNodesRef = useRef<Record<string, NodeStatus>>({});
-
-  // Check if nodes have actually changed (deep comparison of keys and status)
-  const nodesChanged = useMemo(() => {
-    const currentKeys = Object.keys(nodes).sort().join(',');
-    const prevKeys = Object.keys(prevNodesRef.current).sort().join(',');
-    
-    if (currentKeys !== prevKeys) return true;
-    
-    // Check if any node status changed
-    for (const key in nodes) {
-      if (nodes[key].status !== prevNodesRef.current[key]?.status) {
-        return true;
-      }
-    }
-    return false;
-  }, [nodes]);
+export function NetworkTopology() {
+  const [nodes, setNodes] = useNodesState<Node<ClusterNodeData>>([]);
+  const [edges, setEdges] = useEdgesState<Edge>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Only update if nodes actually changed
-    if (!nodesChanged && graphData.nodes.length > 0) {
-      return;
-    }
-
-    const nodesList = Object.values(nodes);
-    if (nodesList.length === 0) {
-      setGraphData({ nodes: [], links: [] });
-      prevNodesRef.current = {};
-      return;
-    }
-
-    // Preserve existing node positions
-    const existingNodesMap = new Map(graphData.nodes.map(n => [n.id, n]));
-    
-    const graphNodes: GraphNode[] = [];
-    const graphLinks: GraphLink[] = [];
-    const processedLinks = new Set<string>();
-
-    // Add all nodes, preserving positions if they exist
-    nodesList.forEach((node) => {
-      const existingNode = existingNodesMap.get(node.nodeUrl);
-      graphNodes.push({
-        id: node.nodeUrl,
-        name: node.nodeUrl,
-        val: node.status === "active" ? 30 : 20,
-        color: node.status === "active" ? "#84cc16" : node.status === "stale" ? "#eab308" : "#ef4444",
-        status: node.status,
-        // Preserve position and velocity if node already exists
-        ...(existingNode && {
-          x: existingNode.x,
-          y: existingNode.y,
-          vx: existingNode.vx,
-          vy: existingNode.vy,
-        }),
-      });
-
-      // Add links to peers (avoid duplicates)
-      if (node.peers && node.peers.length > 0) {
-        node.peers.forEach((peer) => {
-          const linkId = [node.nodeUrl, peer].sort().join("--");
-          if (!processedLinks.has(linkId)) {
-            processedLinks.add(linkId);
-            graphLinks.push({
-              source: node.nodeUrl,
-              target: peer,
-              color: node.status === "active" ? "#84cc16" : "#666",
+    const fetchTopology = async () => {
+      try {
+        // Fetch initial gossip from seed
+        const seedGossip = await api.getGossipMetrics();
+        
+        // Build list of all nodes
+        const allNodeUrls = [seedGossip.node_url, ...seedGossip.peer_details.map(p => p.url)];
+        
+        // Fetch gossip from each node
+        const gossipPromises = allNodeUrls.map(async (nodeUrl) => {
+          try {
+            const gossip = await api.getGossipMetrics(nodeUrl);
+            return { nodeUrl, gossip, success: true };
+          } catch (err) {
+            return { nodeUrl, gossip: null, success: false };
+          }
+        });
+        
+        const gossipResults = await Promise.all(gossipPromises);
+        
+        // Sort nodes alphabetically by URL for consistent positioning
+        gossipResults.sort((a, b) => a.nodeUrl.localeCompare(b.nodeUrl));
+        
+        // Build nodes and edges
+        const newNodes: Node<ClusterNodeData>[] = [];
+        const edgeMap = new Map<string, { from: string; to: string; bidirectional: boolean }>();
+        
+        gossipResults.forEach(({ nodeUrl, gossip, success }, index) => {
+          // Calculate circular position
+          const totalNodes = gossipResults.length;
+          const radius = 250; // Distance from center
+          const centerX = 400;
+          const centerY = 300;
+          const angle = (index * 2 * Math.PI) / totalNodes - Math.PI / 2; // Start from top
+          const x = centerX + radius * Math.cos(angle);
+          const y = centerY + radius * Math.sin(angle);
+          
+          if (success && gossip) {
+            // Create node
+            const nodeData: ClusterNodeData = {
+              url: nodeUrl,
+              status: "active",
+              peers: gossip.peer_details.length,
+              heartbeat: gossip.node_heartbeat,
+              lag: 0,
+              isSeed: nodeUrl === seedGossip.node_url,
+            };
+            
+            newNodes.push({
+              id: nodeUrl,
+              type: "cluster",
+              position: { x, y },
+              data: nodeData,
+            });
+            
+            // Create edges from this node to its peers
+            gossip.peer_details.forEach((peer) => {
+              const edgeKey = [nodeUrl, peer.url].sort().join("--");
+              
+              if (edgeMap.has(edgeKey)) {
+                // Mark as bidirectional
+                const existing = edgeMap.get(edgeKey)!;
+                edgeMap.set(edgeKey, { ...existing, bidirectional: true });
+              } else {
+                // Add new edge
+                edgeMap.set(edgeKey, {
+                  from: nodeUrl,
+                  to: peer.url,
+                  bidirectional: false,
+                });
+              }
+            });
+          } else {
+            // Dead node
+            newNodes.push({
+              id: nodeUrl,
+              type: "cluster",
+              position: { x, y },
+              data: {
+                url: nodeUrl,
+                status: "dead",
+                peers: 0,
+                heartbeat: 0,
+                lag: 0,
+                isSeed: nodeUrl === seedGossip.node_url,
+              },
             });
           }
         });
-      }
-    });
-
-    setGraphData({ nodes: graphNodes, links: graphLinks });
-    prevNodesRef.current = nodes;
-  }, [nodes, nodesChanged]);
-
-  // Configure forces for better separation (only once on mount)
-  useEffect(() => {
-    if (fgRef.current && graphData.nodes.length > 0) {
-      const fg = fgRef.current;
-      
-      // Increase repulsion force
-      fg.d3Force('charge')?.strength(-500);
-      
-      // Increase link distance
-      fg.d3Force('link')?.distance(150);
-      
-      // Reduce center gravity
-      fg.d3Force('center')?.strength(0.05);
-    }
-  }, [graphData.nodes.length]);
-
-  useEffect(() => {
-    const updateDimensions = () => {
-      if (containerRef.current) {
-        const width = containerRef.current.offsetWidth;
-        setDimensions({ width, height: 500 });
+        
+        
+        
+        // Helper function to find the shortest connection between two nodes
+        const findShortestHandles = (fromNode: Node, toNode: Node) => {
+          const handles = [
+            { name: "top", offset: { x: 0, y: -20 } },
+            { name: "right", offset: { x: 120, y: 0 } },
+            { name: "bottom", offset: { x: 0, y: 40 } },
+            { name: "left", offset: { x: -120, y: 0 } },
+          ];
+          
+          let shortestDistance = Infinity;
+          let bestPair = { source: "bottom", target: "top" };
+          
+          // Try all combinations of source and target handles
+          for (const sourceHandle of handles) {
+            for (const targetHandle of handles) {
+              const sourcePos = {
+                x: fromNode.position.x + sourceHandle.offset.x,
+                y: fromNode.position.y + sourceHandle.offset.y,
+              };
+              const targetPos = {
+                x: toNode.position.x + targetHandle.offset.x,
+                y: toNode.position.y + targetHandle.offset.y,
+              };
+              
+              const distance = Math.sqrt(
+                Math.pow(targetPos.x - sourcePos.x, 2) + 
+                Math.pow(targetPos.y - sourcePos.y, 2)
+              );
+              
+              if (distance < shortestDistance) {
+                shortestDistance = distance;
+                bestPair = { source: sourceHandle.name, target: targetHandle.name };
+              }
+            }
+          }
+          
+          return bestPair;
+        };
+        
+        // Build edges array with shortest path routing
+        const newEdges: Edge[] = [];
+        edgeMap.forEach(({ from, to, bidirectional }, key) => {
+          const fromNode = newNodes.find(n => n.id === from);
+          const toNode = newNodes.find(n => n.id === to);
+          
+          let sourceHandle = undefined;
+          let targetHandle = undefined;
+          
+          if (fromNode && toNode) {
+            const handles = findShortestHandles(fromNode, toNode);
+            sourceHandle = handles.source;
+            targetHandle = handles.target;
+          }
+          
+          newEdges.push({
+            id: key,
+            source: from,
+            target: to,
+            sourceHandle,
+            targetHandle,
+            type: "straight", // Use straight lines for shortest path
+            animated: bidirectional,
+            style: {
+              stroke: bidirectional ? "#84cc16" : "#eab308",
+              strokeWidth: bidirectional ? 2.5 : 2,
+            },
+            markerEnd: bidirectional ? undefined : {
+              type: MarkerType.ArrowClosed,
+              color: "#eab308",
+            },
+          });
+        });
+        
+        setNodes(newNodes);
+        setEdges(newEdges);
+        setLoading(false);
+      } catch (err) {
+        console.error("Failed to fetch topology", err);
+        setLoading(false);
       }
     };
 
-    updateDimensions();
-    window.addEventListener("resize", updateDimensions);
-    return () => window.removeEventListener("resize", updateDimensions);
-  }, []);
+    fetchTopology();
+    const interval = setInterval(fetchTopology, 5000);
+    return () => clearInterval(interval);
+  }, [setNodes, setEdges]);
 
-  if (graphData.nodes.length === 0) {
+  const edgeTypeCounts = useMemo(() => {
+    const bidirectional = edges.filter(e => e.animated).length;
+    const unidirectional = edges.length - bidirectional;
+    return { bidirectional, unidirectional };
+  }, [edges]);
+
+  if (loading) {
     return (
       <Card>
         <CardHeader>
@@ -152,79 +224,79 @@ export function NetworkTopology({ nodes }: NetworkTopologyProps) {
             Network Topology
           </CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-col items-center justify-center h-64 text-muted-foreground space-y-2">
-          <Network className="h-12 w-12 opacity-20" />
-          <p>No topology data available</p>
-          <p className="text-xs">Nodes will appear here once discovered</p>
+        <CardContent className="flex items-center justify-center h-96">
+          <div className="text-muted-foreground">Loading topology...</div>
         </CardContent>
       </Card>
     );
   }
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className="h-full flex flex-col">
+      <CardHeader className="border-b">
         <div className="flex items-center justify-between">
           <CardTitle className="flex items-center gap-2">
             <Network className="h-5 w-5" />
             Network Topology
           </CardTitle>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <div className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded-full bg-lime-500" />
-              <span>Active</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded-full bg-yellow-500" />
-              <span>Stale</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded-full bg-red-500" />
-              <span>Dead</span>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="gap-1">
+                <ArrowLeftRight className="h-3 w-3 text-green-600" />
+                {edgeTypeCounts.bidirectional} Bidirectional
+              </Badge>
+              <Badge variant="outline" className="gap-1">
+                <ArrowRight className="h-3 w-3 text-yellow-600" />
+                {edgeTypeCounts.unidirectional} One-way
+              </Badge>
             </div>
           </div>
         </div>
       </CardHeader>
-      <CardContent>
-        <div ref={containerRef} className="relative bg-muted/30 rounded-lg overflow-hidden">
-          <ForceGraph2D
-            ref={fgRef}
-            graphData={graphData}
-            width={dimensions.width}
-            height={dimensions.height}
-            nodeLabel="name"
-            nodeColor="color"
-            nodeRelSize={8}
-            nodeVal="val"
-            linkColor="color"
-            linkWidth={2}
-            backgroundColor="rgba(0,0,0,0)"
-            linkDirectionalParticles={2}
-            linkDirectionalParticleWidth={2}
-            linkDirectionalParticleSpeed={0.005}
-            enableNodeDrag={true}
-            enableZoomInteraction={true}
-            enablePanInteraction={true}
-            cooldownTicks={100}
-            d3AlphaDecay={0.02}
-            d3VelocityDecay={0.3}
-            onNodeClick={(node: any) => {
-              // Node clicked - could add details modal here
+      <CardContent className="flex-1 p-0 relative">
+        <div className="absolute inset-0">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            fitView
+            minZoom={0.5}
+            maxZoom={2}
+            defaultEdgeOptions={{
+              animated: false,
             }}
-            nodeCanvasObjectMode={() => "after"}
-            nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
-              const label = node.name;
-              const fontSize = 12 / globalScale;
-              ctx.font = `${fontSize}px Sans-Serif`;
-              ctx.textAlign = "center";
-              ctx.textBaseline = "middle";
-              ctx.fillStyle = "#ffffff";
-              ctx.fillText(label.split(":").pop() || "", node.x, node.y + 20 / globalScale);
+          >
+          <Background />
+          <Controls className="!border !shadow-sm" />
+          <MiniMap
+            nodeColor={(node) => {
+              const data = node.data as ClusterNodeData;
+              return data.status === "active" ? "#84cc16" : data.status === "stale" ? "#eab308" : "#ef4444";
             }}
+            className="!border !shadow-sm !bg-background"
           />
-          <div className="absolute bottom-4 right-4 text-xs text-muted-foreground bg-background/80 backdrop-blur-sm px-3 py-2 rounded-lg border">
-            {graphData.nodes.length} node{graphData.nodes.length !== 1 ? "s" : ""} •{" "}
-            {graphData.links.length} connection{graphData.links.length !== 1 ? "s" : ""}
+          </ReactFlow>
+        </div>
+        
+        {/* Legend */}
+        <div className="absolute bottom-4 left-4 bg-background/95 backdrop-blur-sm border rounded-lg p-3 shadow-lg text-xs space-y-2">
+          <div className="font-semibold mb-2">Legend</div>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-0.5 bg-green-500"></div>
+            <span>Bidirectional (mutual peers)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-0.5 bg-yellow-500"></div>
+            <ArrowRight className="h-3 w-3 text-yellow-600" />
+            <span>One-way (asymmetric)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+            <span>Active node</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+            <span>Dead node</span>
           </div>
         </div>
       </CardContent>

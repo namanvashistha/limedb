@@ -7,6 +7,7 @@ export interface NodeStatus {
 }
 
 export interface GossipMetrics {
+  node_url: string;
   cluster_health: "healthy" | "degraded" | "critical" | "unknown";
   node_heartbeat: number;
   total_peers: number;
@@ -18,6 +19,7 @@ export interface GossipMetrics {
   max_lag: number;
   peer_details: PeerDetail[];
   status?: string;
+  timestamp?: number;
 }
 
 export interface PeerDetail {
