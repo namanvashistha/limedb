@@ -346,21 +346,20 @@ else
     exit 1
 fi
 
-# Wait for container to be ready and network available (optimized)
+# Wait for container to be ready and network available (Alpine-compatible)
 msg_info "Waiting for network connectivity"
-for i in {1..15}; do
-    if pct exec $CTID -- test -f /bin/bash 2>/dev/null; then
-        # Container is responsive, test network with lighter check
-        if pct exec $CTID -- timeout 2 ping -c1 8.8.8.8 &>/dev/null; then
-            echo -e "${CM} ${GN}Network ready${CL}"
-            break
-        fi
+for i in {1..30}; do
+    # Alpine doesn't have bash or timeout by default, use simple ping test
+    # This works on Alpine, Debian, and Ubuntu
+    if pct exec $CTID -- sh -c 'ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1' 2>/dev/null; then
+        echo -e "${CM} ${GN}Network ready${CL}"
+        break
     fi
-    echo -ne "\r ${YW}Waiting for network connectivity... (${i}/15)${CL}"
+    echo -ne "\r ${YW}Waiting for network connectivity... (${i}/30)${CL}"
     sleep 2
-    if [[ $i -eq 15 ]]; then
+    if [[ $i -eq 30 ]]; then
         echo -ne "\r"
-        msg_error "Network not ready after 30 seconds"
+        msg_error "Network not ready after 60 seconds"
         echo -e "${WARNING} ${YW}Container may still be starting. Try: pct enter ${CTID}${CL}"
         exit 1
     fi
@@ -414,7 +413,7 @@ else
 fi
 
 echo -ne " ${YW}Installing LimeDB + OTEL Collector (all steps)...${CL}"
-pct exec $CTID -- bash -c "
+pct exec $CTID -- sh -c "
 # Set environment variables from host
 export GRAFANA_OTLP_ENDPOINT='$GRAFANA_OTLP_ENDPOINT'
 export GRAFANA_CLOUD_USERNAME='$GRAFANA_CLOUD_USERNAME' 
@@ -431,9 +430,20 @@ export CLUSTER_PEERS='$CLUSTER_PEERS'
         fi
     fi
 
-    # Update and install dependencies
-    apt-get update &>/dev/null
-    apt-get install -y curl ca-certificates wget tar &>/dev/null
+    # Detect OS and install dependencies accordingly
+    if [ -f /etc/alpine-release ]; then
+        # Alpine Linux
+        apk update &>/dev/null
+        apk add --no-cache curl ca-certificates wget tar bash &>/dev/null
+    elif [ -f /etc/debian_version ]; then
+        # Debian/Ubuntu
+        apt-get update &>/dev/null
+        apt-get install -y curl ca-certificates wget tar &>/dev/null
+    else
+        # Fallback to apt-get
+        apt-get update &>/dev/null
+        apt-get install -y curl ca-certificates wget tar &>/dev/null
+    fi
     
     # Get latest version and download in parallel
     LATEST_VERSION=\$(curl -s https://api.github.com/repos/namanvashistha/limedb/releases/latest | grep '\"tag_name\":' | sed -E 's/.*\"([^\"]+)\".*/\1/')
