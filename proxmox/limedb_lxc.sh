@@ -348,22 +348,35 @@ fi
 
 # Wait for container to be ready and network available (Alpine-compatible)
 msg_info "Waiting for network connectivity"
+NETWORK_READY=false
 for i in {1..30}; do
-    # Alpine doesn't have bash or timeout by default, use simple ping test
-    # This works on Alpine, Debian, and Ubuntu
-    if pct exec $CTID -- sh -c 'ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1' 2>/dev/null; then
-        echo -e "${CM} ${GN}Network ready${CL}"
-        break
+    # First check if container shell is responsive
+    if pct exec $CTID -- echo "test" >/dev/null 2>&1; then
+        # Container is responsive, now test network
+        # Alpine's ping might not support all flags, use minimal command
+        if pct exec $CTID -- ping -c 1 8.8.8.8 >/dev/null 2>&1; then
+            echo -e "${CM} ${GN}Network ready${CL}"
+            NETWORK_READY=true
+            break
+        fi
     fi
     echo -ne "\r ${YW}Waiting for network connectivity... (${i}/30)${CL}"
     sleep 2
-    if [[ $i -eq 30 ]]; then
-        echo -ne "\r"
+done
+
+if [[ "$NETWORK_READY" != "true" ]]; then
+    echo -ne "\r"
+    # Network check failed, but let's verify if it's actually down
+    echo -ne " ${YW}Verifying network status...${CL}"
+    if pct exec $CTID -- ping -c 1 8.8.8.8 >/dev/null 2>&1; then
+        # Network is actually working, the timeout was just too aggressive
+        echo -e "\r${CM} ${GN}Network ready (verified)${CL}"
+    else
         msg_error "Network not ready after 60 seconds"
         echo -e "${WARNING} ${YW}Container may still be starting. Try: pct enter ${CTID}${CL}"
         exit 1
     fi
-done
+fi
 
 # Get container IP (use static IP if configured)
 if [[ -n "$NETWORK_PREFIX" ]]; then
