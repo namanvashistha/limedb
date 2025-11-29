@@ -240,25 +240,21 @@ if [[ -z "$OS_TEMPLATE" ]]; then
     exit 1
 fi
 
-# Handle different template extensions - strip the extension properly
-if [[ "$OS_TEMPLATE" == *.tar.xz ]]; then
-    TEMPLATE_NAME="${OS_TEMPLATE%.tar.xz}"
-    TEMPLATE_EXT=".tar.xz"
-elif [[ "$OS_TEMPLATE" == *.tar.zst ]]; then
-    TEMPLATE_NAME="${OS_TEMPLATE%.tar.zst}"
-    TEMPLATE_EXT=".tar.zst"
-else
-    TEMPLATE_NAME="$OS_TEMPLATE"
-    TEMPLATE_EXT=""
-fi
+# OS_TEMPLATE contains storage path like "local:vztmpl/alpine-3.22-default_20250617_amd64.tar.xz"
+# Extract just the filename
+TEMPLATE_FILENAME=$(basename "${OS_TEMPLATE##*:vztmpl/}")
+# Remove extension for display
+TEMPLATE_DISPLAY="${TEMPLATE_FILENAME%.tar.*}"
 
-echo -e "${CM} ${GN}OS Template${CL}        ${TEMPLATE_NAME}"
+echo -e "${CM} ${GN}OS Template${CL}        ${TEMPLATE_DISPLAY}"
 
 # Create container
 msg_info "Creating LXC Container"
 
-# Build the pct create command with proper template path
-TEMPLATE_PATH="${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE_NAME}${TEMPLATE_EXT}"
+# pct create works best with full filesystem path
+# Convert: local:vztmpl/alpine-3.22-default_20250617_amd64.tar.xz
+# To: /var/lib/vz/template/cache/alpine-3.22-default_20250617_amd64.tar.xz
+TEMPLATE_PATH="/var/lib/vz/template/cache/${TEMPLATE_FILENAME}"
 
 # Show container specifications being created
 echo -ne "\r ${DGN}Creating container ${CTID} with ${var_cpu} core(s), ${var_ram}MB RAM, ${var_disk}GB storage...${CL}"
