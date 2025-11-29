@@ -240,24 +240,25 @@ if [[ -z "$OS_TEMPLATE" ]]; then
     exit 1
 fi
 
-# Handle different template extensions
-TEMPLATE_NAME=$(basename "$OS_TEMPLATE" .tar.zst)
-if [[ "$TEMPLATE_NAME" == "$OS_TEMPLATE" ]]; then
-    # If .tar.zst didn't match, try .tar.xz (Alpine uses this)
-    TEMPLATE_NAME=$(basename "$OS_TEMPLATE" .tar.xz)
+# Handle different template extensions - strip the extension properly
+if [[ "$OS_TEMPLATE" == *.tar.xz ]]; then
+    TEMPLATE_NAME="${OS_TEMPLATE%.tar.xz}"
+    TEMPLATE_EXT=".tar.xz"
+elif [[ "$OS_TEMPLATE" == *.tar.zst ]]; then
+    TEMPLATE_NAME="${OS_TEMPLATE%.tar.zst}"
+    TEMPLATE_EXT=".tar.zst"
+else
+    TEMPLATE_NAME="$OS_TEMPLATE"
+    TEMPLATE_EXT=""
 fi
+
 echo -e "${CM} ${GN}OS Template${CL}        ${TEMPLATE_NAME}"
 
 # Create container
 msg_info "Creating LXC Container"
 
 # Build the pct create command with proper template path
-# Detect the extension from the OS_TEMPLATE
-if [[ "$OS_TEMPLATE" == *.tar.xz ]]; then
-    TEMPLATE_PATH="${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE_NAME}.tar.xz"
-else
-    TEMPLATE_PATH="${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE_NAME}.tar.zst"
-fi
+TEMPLATE_PATH="${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE_NAME}${TEMPLATE_EXT}"
 
 # Show container specifications being created
 echo -ne "\r ${DGN}Creating container ${CTID} with ${var_cpu} core(s), ${var_ram}MB RAM, ${var_disk}GB storage...${CL}"
