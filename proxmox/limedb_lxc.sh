@@ -34,8 +34,8 @@ APP="LimeDB"
 var_cpu="${var_cpu:-1}"
 var_ram="${var_ram:-150}"
 var_disk="${var_disk:-2}"
-var_os="${var_os:-debian}"
-var_version="${var_version:-12}"
+var_os="${var_os:-alpine}"
+var_version="${var_version:-3.22}"
 var_unprivileged="${var_unprivileged:-1}"
 PASSWORD="password"
 
@@ -215,6 +215,9 @@ echo -e "${CM} ${GN}Container Storage${CL}  ${CONTAINER_STORAGE} ${DGN}(${CONTAI
 msg_info "Finding OS template"
 OS_TEMPLATE=""
 case "$var_os" in
+    "alpine")
+        TEMPLATE_PATTERN="alpine-${var_version}"
+        ;;
     "debian")
         TEMPLATE_PATTERN="debian-${var_version}-standard"
         ;;
@@ -222,7 +225,8 @@ case "$var_os" in
         TEMPLATE_PATTERN="ubuntu-${var_version}"
         ;;
     *)
-        TEMPLATE_PATTERN="debian-12-standard"
+        # Default to Alpine for smaller footprint
+        TEMPLATE_PATTERN="alpine-"
         ;;
 esac
 
@@ -232,19 +236,28 @@ OS_TEMPLATE=$(pveam list $TEMPLATE_STORAGE 2>/dev/null | grep "$TEMPLATE_PATTERN
 if [[ -z "$OS_TEMPLATE" ]]; then
     msg_error "No suitable OS template found for $var_os $var_version"
     echo "Available templates:"
-    pveam list $TEMPLATE_STORAGE 2>/dev/null | grep -E "(debian|ubuntu)" | head -5
+    pveam list $TEMPLATE_STORAGE 2>/dev/null | grep -E "(alpine|debian|ubuntu)" | head -5
     exit 1
 fi
 
+# Handle different template extensions
 TEMPLATE_NAME=$(basename "$OS_TEMPLATE" .tar.zst)
+if [[ "$TEMPLATE_NAME" == "$OS_TEMPLATE" ]]; then
+    # If .tar.zst didn't match, try .tar.xz (Alpine uses this)
+    TEMPLATE_NAME=$(basename "$OS_TEMPLATE" .tar.xz)
+fi
 echo -e "${CM} ${GN}OS Template${CL}        ${TEMPLATE_NAME}"
 
 # Create container
 msg_info "Creating LXC Container"
 
 # Build the pct create command with proper template path
-# The OS_TEMPLATE already contains the full filename, just need storage:vztmpl/filename
-TEMPLATE_PATH="${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE_NAME}.tar.zst"
+# Detect the extension from the OS_TEMPLATE
+if [[ "$OS_TEMPLATE" == *.tar.xz ]]; then
+    TEMPLATE_PATH="${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE_NAME}.tar.xz"
+else
+    TEMPLATE_PATH="${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE_NAME}.tar.zst"
+fi
 
 # Show container specifications being created
 echo -ne "\r ${DGN}Creating container ${CTID} with ${var_cpu} core(s), ${var_ram}MB RAM, ${var_disk}GB storage...${CL}"
