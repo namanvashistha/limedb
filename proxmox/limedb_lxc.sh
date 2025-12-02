@@ -361,35 +361,36 @@ else
 fi
 
 # Wait for container to be ready and network available (Alpine-compatible)
-msg_info "Waiting for network connectivity"
-NETWORK_READY=false
-for i in {1..30}; do
+msg_info "Waiting for container to be ready"
+CONTAINER_READY=false
+for i in {1..45}; do
     # First check if container shell is responsive
-    if pct exec $CTID -- echo "test" >/dev/null 2>&1; then
-        # Container is responsive, now test network
-        # Alpine's ping might not support all flags, use minimal command
-        if pct exec $CTID -- ping -c 1 8.8.8.8 >/dev/null 2>&1; then
-            echo -e "${CM} ${GN}Network ready${CL}"
-            NETWORK_READY=true
+    if pct exec $CTID -- test -d /etc >/dev/null 2>&1; then
+        # Container filesystem is ready, now check network
+        # Try to resolve DNS first (faster than ping)
+        if pct exec $CTID -- nslookup google.com >/dev/null 2>&1 || \
+           pct exec $CTID -- ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1; then
+            echo -e "${CM} ${GN}Container ready${CL}"
+            CONTAINER_READY=true
             break
         fi
     fi
-    echo -ne "\r ${YW}Waiting for network connectivity... (${i}/30)${CL}"
-    sleep 2
+    
+    # Show progress every 3 seconds to reduce output noise
+    if (( i % 3 == 0 )); then
+        echo -ne "\r ${YW}Waiting for container to be ready... (${i}s)${CL}"
+    fi
+    sleep 1
 done
 
-if [[ "$NETWORK_READY" != "true" ]]; then
-    echo -ne "\r"
-    # Network check failed, but let's verify if it's actually down
-    echo -ne " ${YW}Verifying network status...${CL}"
-    if pct exec $CTID -- ping -c 1 8.8.8.8 >/dev/null 2>&1; then
-        # Network is actually working, the timeout was just too aggressive
-        echo -e "\r${CM} ${GN}Network ready (verified)${CL}"
-    else
-        msg_error "Network not ready after 60 seconds"
-        echo -e "${WARNING} ${YW}Container may still be starting. Try: pct enter ${CTID}${CL}"
-        exit 1
-    fi
+echo -ne "\r"
+if [[ "$CONTAINER_READY" != "true" ]]; then
+    # Container didn't respond in time, but let's proceed anyway
+    echo -e "${WARNING} ${YW}Container startup is taking longer than expected${CL}"
+    echo -e "${INFO} ${BL}Proceeding with installation (container may finish starting up)${CL}"
+    
+    # Give it a few more seconds
+    sleep 5
 fi
 
 # Get container IP (use static IP if configured)
