@@ -218,14 +218,8 @@ case "$var_os" in
     "alpine")
         TEMPLATE_PATTERN="alpine-${var_version}"
         ;;
-    "debian")
-        TEMPLATE_PATTERN="debian-${var_version}-standard"
-        ;;
-    "ubuntu")
-        TEMPLATE_PATTERN="ubuntu-${var_version}"
-        ;;
     *)
-        # Default to Alpine for smaller footprint
+        # Default to Alpine
         TEMPLATE_PATTERN="alpine-"
         ;;
 esac
@@ -236,7 +230,7 @@ OS_TEMPLATE=$(pveam list $TEMPLATE_STORAGE 2>/dev/null | grep "$TEMPLATE_PATTERN
 if [[ -z "$OS_TEMPLATE" ]]; then
     msg_error "No suitable OS template found for $var_os $var_version"
     echo "Available templates:"
-    pveam list $TEMPLATE_STORAGE 2>/dev/null | grep -E "(alpine|debian|ubuntu)" | head -5
+    pveam list $TEMPLATE_STORAGE 2>/dev/null | grep "alpine" | head -5
     exit 1
 fi
 
@@ -408,7 +402,7 @@ echo -e "${DGN}━━━━━━━━━━━━━━━━━━━━━�
 # Note: LimeDB now requires mandatory node URL specification
 # The service is configured as a single-node cluster by default
 # OTEL Collector will be installed to forward telemetry to Grafana Cloud
-# For multi-node clusters, edit the systemd service file after installation
+# For multi-node clusters, edit the OpenRC service file after installation
 
 # Install dependencies, LimeDB, and OTEL Collector (optimized single operation)
 # Get container IP before entering container execution
@@ -458,20 +452,9 @@ export CLUSTER_PEERS='$CLUSTER_PEERS'
         fi
     fi
 
-    # Detect OS and install dependencies accordingly
-    if [ -f /etc/alpine-release ]; then
-        # Alpine Linux
-        apk update &>/dev/null
-        apk add --no-cache curl ca-certificates wget tar bash &>/dev/null
-    elif [ -f /etc/debian_version ]; then
-        # Debian/Ubuntu
-        apt-get update &>/dev/null
-        apt-get install -y curl ca-certificates wget tar &>/dev/null
-    else
-        # Fallback to apt-get
-        apt-get update &>/dev/null
-        apt-get install -y curl ca-certificates wget tar &>/dev/null
-    fi
+    # Install dependencies for Alpine Linux
+    apk update &>/dev/null
+    apk add --no-cache curl ca-certificates wget tar bash &>/dev/null
     
     # Get latest version and download in parallel
     LATEST_VERSION=\$(curl -s https://api.github.com/repos/namanvashistha/limedb/releases/latest | grep '\"tag_name\":' | sed -E 's/.*\"([^\"]+)\".*/\1/')
@@ -652,11 +635,9 @@ CONFIGUREDENV
         cp /etc/otelcol/environment.template /etc/otelcol/environment
     fi
 
-    # Detect init system and create appropriate service files
-    if [ -f /etc/alpine-release ]; then
-        # Alpine Linux - OpenRC
-        
-        # Create OTEL Collector OpenRC service
+    # Create OpenRC service files for Alpine Linux
+    
+    # Create OTEL Collector OpenRC service
         cat > /etc/init.d/otel-collector << 'OTELRC'
 #!/sbin/openrc-run
 
@@ -692,13 +673,13 @@ OTELRC
         chmod +x /etc/init.d/otel-collector
         
         # Create LimeDB OpenRC service
-        cat > /etc/init.d/limedb << 'LIMERC'
+        cat > /etc/init.d/limedb << LIMERC
 #!/sbin/openrc-run
 
 name="LimeDB"
 description="LimeDB Key-Value Store"
 command="/usr/local/bin/limedb"
-command_args="-server.port 8484 -node.url \"http://\${CONTAINER_IP}:8484\"\$([ -n \"\${CLUSTER_PEERS}\" ] && echo \" -node.peers \\\"\${CLUSTER_PEERS}\\\"\")"
+command_args="-server.port 8484 -node.url \"http://${CONTAINER_IP}:8484\"${CLUSTER_PEERS:+ -node.peers \"${CLUSTER_PEERS}\"}"
 command_background=true
 pidfile="/var/run/limedb.pid"
 output_log="/var/log/limedb.log"
@@ -713,60 +694,11 @@ start_pre() {
     export OTEL_ENABLED=true
     export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
     export OTEL_SERVICE_NAME=limedb
-    export OTEL_SERVICE_VERSION=\${LATEST_VERSION}
+    export OTEL_SERVICE_VERSION=${LATEST_VERSION}
     export OTEL_ENVIRONMENT=production
 }
 LIMERC
         chmod +x /etc/init.d/limedb
-        
-    else
-        # Debian/Ubuntu - systemd
-        
-        # Create OTEL Collector systemd service
-        cat > /etc/systemd/system/otel-collector.service << 'OTELSVC'
-[Unit]
-Description=OpenTelemetry Collector
-After=network.target
-
-[Service]
-Type=simple
-User=root
-EnvironmentFile=/etc/otelcol/environment
-ExecStart=/usr/local/bin/otelcol --config=/etc/otelcol/config.yaml
-Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-OTELSVC
-
-        # Create LimeDB systemd service with OTEL integration
-        cat > /etc/systemd/system/limedb.service << LIMESVC
-[Unit]
-Description=LimeDB Key-Value Store
-After=network.target otel-collector.service
-Wants=otel-collector.service
-
-[Service]
-Type=simple
-User=root
-Environment=OTEL_ENABLED=true
-Environment=OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
-Environment=OTEL_SERVICE_NAME=limedb
-Environment=OTEL_SERVICE_VERSION=\${LATEST_VERSION}
-Environment=OTEL_ENVIRONMENT=production
-ExecStart=/usr/local/bin/limedb -server.port 8484 -node.url \"http://\${CONTAINER_IP}:8484\"\$([ -n \"\$CLUSTER_PEERS\" ] && echo \" -node.peers \\\"\$CLUSTER_PEERS\\\"\")
-Restart=on-failure
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-LIMESVC
-    fi
     
     # Create MOTD
     cat > /etc/motd << 'MOTDEOF'
@@ -792,27 +724,9 @@ LIMESVC
 
 MOTDEOF
     
-    # Setup auto-login based on init system
-    if [ -f /etc/alpine-release ]; then
-        # Alpine Linux - configure getty autologin
-        sed -i 's/^tty1/#tty1/' /etc/inittab 2>/dev/null || true
-        echo 'tty1::respawn:/sbin/getty -n -l /bin/sh 38400 tty1' >> /etc/inittab
-    else
-        # Debian/Ubuntu - systemd auto-login
-        mkdir -p /etc/systemd/system/getty@tty1.service.d
-        cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf << 'AUTOEOF'
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin root --noclear %I \$TERM
-AUTOEOF
-        
-        mkdir -p /etc/systemd/system/container-getty@1.service.d
-        cat > /etc/systemd/system/container-getty@1.service.d/autologin.conf << 'AUTOEOF2'
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin root --noclear --keep-baud console 115200,38400,9600 \$TERM
-AUTOEOF2
-    fi
+    # Setup auto-login for Alpine
+    sed -i 's/^tty1/#tty1/' /etc/inittab 2>/dev/null || true
+    echo 'tty1::respawn:/sbin/getty -n -l /bin/sh 38400 tty1' >> /etc/inittab
     
     # Wait for downloads to complete and install
     wait \$LIMEDB_PID
@@ -824,28 +738,14 @@ AUTOEOF2
     chmod +x /usr/local/bin/otelcol
     rm -f otelcol.tar.gz
     
-    # Enable and start services based on init system
-    if [ -f /etc/alpine-release ]; then
-        # Alpine Linux - OpenRC
-        rc-update add limedb default &>/dev/null
-        rc-service limedb start &>/dev/null
-        
-        # Start OTEL Collector if credentials are configured
-        if [[ -n \"\$GRAFANA_CLOUD_USERNAME\" && -n \"\$GRAFANA_CLOUD_PASSWORD\" && -n \"\$GRAFANA_OTLP_ENDPOINT\" ]]; then
-            rc-update add otel-collector default &>/dev/null
-            rc-service otel-collector start &>/dev/null
-        fi
-    else
-        # Debian/Ubuntu - systemd
-        systemctl daemon-reload
-        systemctl enable limedb.service &>/dev/null
-        systemctl start limedb.service &>/dev/null
-        
-        # Start OTEL Collector if credentials are configured
-        if [[ -n \"\$GRAFANA_CLOUD_USERNAME\" && -n \"\$GRAFANA_CLOUD_PASSWORD\" && -n \"\$GRAFANA_OTLP_ENDPOINT\" ]]; then
-            systemctl enable otel-collector.service &>/dev/null
-            systemctl start otel-collector.service &>/dev/null
-        fi
+    # Enable and start services
+    rc-update add limedb default &>/dev/null
+    rc-service limedb start &>/dev/null
+    
+    # Start OTEL Collector if credentials are configured
+    if [[ -n \"\$GRAFANA_CLOUD_USERNAME\" && -n \"\$GRAFANA_CLOUD_PASSWORD\" && -n \"\$GRAFANA_OTLP_ENDPOINT\" ]]; then
+        rc-update add otel-collector default &>/dev/null
+        rc-service otel-collector start &>/dev/null
     fi
     
     echo \"\$LATEST_VERSION\"
@@ -884,32 +784,17 @@ echo -e "│ ${YW}OTEL HTTP:${CL}      ${GATEWAY}http://${IP}:4318${CL}"
 echo -e "└─────────────────────────────────────────────────────┘"
 echo ""
 
-# Detect OS type for management commands
-OS_TYPE=$(pct exec $CTID -- sh -c 'if [ -f /etc/alpine-release ]; then echo "alpine"; else echo "debian"; fi' 2>/dev/null || echo "debian")
-
 # Management Commands
 echo -e "🔧 ${YW}Management Commands${CL}"
 echo -e "┌─────────────────────────────────────────────────────┐"
 echo -e "│ ${DGN}Enter container:${CL}       pct enter ${CTID}"
 echo -e "│ ${DGN}Stop container:${CL}        pct stop ${CTID}"
 echo -e "│ ${DGN}Start container:${CL}       pct start ${CTID}"
-
-if [[ "$OS_TYPE" == "alpine" ]]; then
-    # Alpine Linux - OpenRC commands
-    echo -e "│ ${DGN}Restart LimeDB:${CL}        pct exec ${CTID} rc-service limedb restart"
-    echo -e "│ ${DGN}Restart OTEL:${CL}          pct exec ${CTID} rc-service otel-collector restart"
-    echo -e "│ ${DGN}View LimeDB logs:${CL}      pct exec ${CTID} tail -f /var/log/limedb.log"
-    echo -e "│ ${DGN}View OTEL logs:${CL}        pct exec ${CTID} tail -f /var/log/otelcol/otelcol.log"
-    echo -e "│ ${DGN}Check status:${CL}          pct exec ${CTID} rc-service limedb status"
-else
-    # Debian/Ubuntu - systemd commands
-    echo -e "│ ${DGN}Restart LimeDB:${CL}        pct exec ${CTID} systemctl restart limedb"
-    echo -e "│ ${DGN}Restart OTEL:${CL}          pct exec ${CTID} systemctl restart otel-collector"
-    echo -e "│ ${DGN}View LimeDB logs:${CL}      pct exec ${CTID} journalctl -u limedb -f"
-    echo -e "│ ${DGN}View OTEL logs:${CL}        pct exec ${CTID} journalctl -u otel-collector -f"
-    echo -e "│ ${DGN}Check status:${CL}          pct exec ${CTID} systemctl status limedb otel-collector"
-fi
-
+echo -e "│ ${DGN}Restart LimeDB:${CL}        pct exec ${CTID} rc-service limedb restart"
+echo -e "│ ${DGN}Restart OTEL:${CL}          pct exec ${CTID} rc-service otel-collector restart"
+echo -e "│ ${DGN}View LimeDB logs:${CL}      pct exec ${CTID} tail -f /var/log/limedb.log"
+echo -e "│ ${DGN}View OTEL logs:${CL}        pct exec ${CTID} tail -f /var/log/otelcol/otelcol.log"
+echo -e "│ ${DGN}Check status:${CL}          pct exec ${CTID} rc-service limedb status"
 echo -e "└─────────────────────────────────────────────────────┘"
 echo ""
 
@@ -918,22 +803,14 @@ echo -e "📊 ${YW}OpenTelemetry Configuration${CL}"
 echo -e "┌─────────────────────────────────────────────────────┐"
 if [[ -n "$GRAFANA_CLOUD_USERNAME" ]]; then
 echo -e "│ ${YW}Status:${CL}                ✅ Pre-configured from environment"
-if [[ "$OS_TYPE" == "alpine" ]]; then
-    echo -e "│ ${DGN}Start OTEL:${CL}             pct exec ${CTID} rc-service otel-collector start"
-else
-    echo -e "│ ${DGN}Start OTEL:${CL}             pct exec ${CTID} systemctl start otel-collector"
-fi
+echo -e "│ ${DGN}Start OTEL:${CL}             pct exec ${CTID} rc-service otel-collector start"
 else
 echo -e "│ ${YW}Status:${CL}                ⚙️  Manual configuration required"
 echo -e "│ ${YW}Config File:${CL}           /etc/otelcol/environment"
 echo -e "│ ${YW}Template:${CL}              /etc/otelcol/environment.template"
 echo -e "│ ${DGN}Enter container:${CL}       pct enter ${CTID}"
 echo -e "│ ${DGN}Edit credentials:${CL}       vi /etc/otelcol/environment"
-if [[ "$OS_TYPE" == "alpine" ]]; then
-    echo -e "│ ${DGN}Start OTEL:${CL}             rc-service otel-collector start"
-else
-    echo -e "│ ${DGN}Start OTEL:${CL}             systemctl start otel-collector"
-fi
+echo -e "│ ${DGN}Start OTEL:${CL}             rc-service otel-collector start"
 fi
 echo -e "└─────────────────────────────────────────────────────┘"
 echo ""
@@ -942,17 +819,10 @@ echo ""
 echo -e "🔗 ${YW}Cluster Configuration${CL}"
 echo -e "┌─────────────────────────────────────────────────────┐"
 echo -e "│ ${YW}Single Node:${CL}           Currently configured"
-if [[ "$OS_TYPE" == "alpine" ]]; then
-    echo -e "│ ${YW}Multi-Node Setup:${CL}      Edit /etc/init.d/limedb"
-    echo -e "│ ${YW}Node URL:${CL}              -node.url \"http://${IP}:8484\""
-    echo -e "│ ${YW}Peers Example:${CL}         -node.peers \"http://ip1:8484,http://ip2:8484\""
-    echo -e "│ ${DGN}Reload after edit:${CL}     rc-service limedb restart"
-else
-    echo -e "│ ${YW}Multi-Node Setup:${CL}      Edit /etc/systemd/system/limedb.service"
-    echo -e "│ ${YW}Node URL:${CL}              -node.url \"http://${IP}:8484\""
-    echo -e "│ ${YW}Peers Example:${CL}         -node.peers \"http://ip1:8484,http://ip2:8484\""
-    echo -e "│ ${DGN}Reload after edit:${CL}     systemctl daemon-reload && systemctl restart limedb"
-fi
+echo -e "│ ${YW}Multi-Node Setup:${CL}      Edit /etc/init.d/limedb"
+echo -e "│ ${YW}Node URL:${CL}              -node.url \"http://${IP}:8484\""
+echo -e "│ ${YW}Peers Example:${CL}         -node.peers \"http://ip1:8484,http://ip2:8484\""
+echo -e "│ ${DGN}Reload after edit:${CL}     rc-service limedb restart"
 echo -e "└─────────────────────────────────────────────────────┘"
 echo ""
 
