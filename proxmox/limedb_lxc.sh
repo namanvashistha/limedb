@@ -265,7 +265,20 @@ if [[ -n "$HOST_IP" ]]; then
     # Extract network portion (first 3 octets) and use CTID as last octet
     NETWORK_PREFIX=$(echo "$HOST_IP" | cut -d. -f1-3)
     STATIC_IP="${NETWORK_PREFIX}.${CTID}/24"
-    GATEWAY_IP="${NETWORK_PREFIX}.1"
+    
+    # Dynamic Gateway Detection
+    # Try to find the default gateway from the host's routing table
+    GATEWAY_IP=$(ip route show default 2>/dev/null | awk '{print $3}' | head -1)
+    
+    # Validate detected gateway
+    if [[ -z "$GATEWAY_IP" ]]; then
+        # Fallback to assuming .1 if detection fails (legacy behavior)
+        GATEWAY_IP="${NETWORK_PREFIX}.1"
+        echo -e "${WARNING} ${YW}Could not detect gateway, assuming ${GATEWAY_IP}${CL}"
+    else
+        echo -e "${INFO} ${BL}Detected gateway: ${GATEWAY_IP}${CL}"
+    fi
+    
     NET_CONFIG="ip=${STATIC_IP},gw=${GATEWAY_IP}"
 else
     # Fallback to DHCP if we can't determine host IP
@@ -284,6 +297,7 @@ echo -ne "\r ${DGN}Assigning static IP: ${NETWORK_PREFIX}.${CTID}${CL}"
         --storage $CONTAINER_STORAGE \
         --password $PASSWORD \
         --net0 name=eth0,bridge=vmbr0,${NET_CONFIG} \
+        --nameserver 8.8.8.8 \
         --features nesting=1 \
         --unprivileged $var_unprivileged \
         --rootfs $CONTAINER_STORAGE:${var_disk} > /tmp/pct_output.log 2>/tmp/pct_error.log
