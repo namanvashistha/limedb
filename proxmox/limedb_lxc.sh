@@ -99,12 +99,12 @@ export GRAFANA_CLOUD_USERNAME='$GRAFANA_CLOUD_USERNAME'
 export GRAFANA_CLOUD_PASSWORD='$GRAFANA_CLOUD_PASSWORD'
 
 apk update &>/dev/null
-apk add --no-cache curl wget tar bash &>/dev/null
+apk add --no-cache curl tar &>/dev/null
 
 LATEST_VERSION=\$(curl -s https://api.github.com/repos/namanvashistha/limedb/releases/latest | grep '\"tag_name\":' | sed -E 's/.*\"([^\"]+)\".*/\1/')
-[[ -z \"\$LATEST_VERSION\" ]] && LATEST_VERSION=\"v0.0.2\"
+[ -z \"\$LATEST_VERSION\" ] && LATEST_VERSION=\"v0.0.2\"
 
-wget -qO /usr/local/bin/limedb \"https://github.com/namanvashistha/limedb/releases/download/\${LATEST_VERSION}/limedb-linux-amd64\"
+curl -sL -o /usr/local/bin/limedb \"https://github.com/namanvashistha/limedb/releases/download/\${LATEST_VERSION}/limedb-linux-amd64\"
 chmod +x /usr/local/bin/limedb
 
 wget -qO /tmp/otel.tar.gz \"https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.140.0/otelcol-contrib_0.140.0_linux_amd64.tar.gz\"
@@ -113,9 +113,9 @@ mv /tmp/otelcol-contrib /usr/local/bin/otelcol
 chmod +x /usr/local/bin/otelcol
 rm -f /tmp/otel.tar.gz
 
-mkdir -p /etc/otelcol /var/log/otelcol
+mkdir -p /etc/otel-collector /var/log/otel-collector
 
-cat > /etc/otelcol/config.yaml << 'OTELCFG'
+cat > /etc/otel-collector/config.yaml << 'OTELCFG'
 receivers:
   otlp:
     protocols:
@@ -142,35 +142,35 @@ service:
       exporters: [otlphttp/grafana_cloud]
 OTELCFG
 
-if [[ -n \"\$GRAFANA_CLOUD_USERNAME\" && -n \"\$GRAFANA_CLOUD_PASSWORD\" ]]; then
-    AUTH_HEADER=\$(echo -n \"\$GRAFANA_CLOUD_USERNAME:\$GRAFANA_CLOUD_PASSWORD\" | base64 -w 0)
-    cat > /etc/otelcol/environment << ENV
+if [[ -n "\$GRAFANA_CLOUD_USERNAME" && -n "\$GRAFANA_CLOUD_PASSWORD" ]]; then
+    AUTH_HEADER=\$(echo -n "\$GRAFANA_CLOUD_USERNAME:\$GRAFANA_CLOUD_PASSWORD" | base64 -w 0)
+    cat > /etc/otel-collector/environment << ENV
 GRAFANA_OTLP_ENDPOINT=\$GRAFANA_OTLP_ENDPOINT
 GRAFANA_CLOUD_AUTH_HEADER=\$AUTH_HEADER
 ENV
 else
-    echo 'GRAFANA_OTLP_ENDPOINT=' > /etc/otelcol/environment
-    echo 'GRAFANA_CLOUD_AUTH_HEADER=' >> /etc/otelcol/environment
+    echo 'GRAFANA_OTLP_ENDPOINT=' > /etc/otel-collector/environment
+    echo 'GRAFANA_CLOUD_AUTH_HEADER=' >> /etc/otel-collector/environment
 fi
 
 cat > /etc/init.d/otel-collector << 'OTELRC'
 #!/sbin/openrc-run
 name=\"OTEL Collector\"
 command=\"/usr/local/bin/otelcol\"
-command_args=\"--config=/etc/otelcol/config.yaml\"
+command_args=\"--config=/etc/otel-collector/config.yaml\"
 command_background=true
 pidfile=\"/var/run/otelcol.pid\"
-output_log=\"/var/log/otelcol/otelcol.log\"
+output_log=\"/var/log/otel-collector/otelcol.log\"
 depend() { need net; }
 start_pre() {
-    [[ -f /etc/otelcol/environment ]] && . /etc/otelcol/environment
-    mkdir -p /var/log/otelcol
+    [ -f /etc/otel-collector/environment ] && . /etc/otel-collector/environment
+    mkdir -p /var/log/otel-collector
 }
 OTELRC
 chmod +x /etc/init.d/otel-collector
 
 PEERS_ARG=''
-[[ -n '$CLUSTER_PEERS' ]] && PEERS_ARG=' -node.peers \"$CLUSTER_PEERS\"'
+[ -n '$CLUSTER_PEERS' ] && PEERS_ARG=' -node.peers \"$CLUSTER_PEERS\"'
 
 cat > /etc/init.d/limedb << LIMERC
 #!/sbin/openrc-run
@@ -191,7 +191,7 @@ chmod +x /etc/init.d/limedb
 rc-update add limedb default &>/dev/null
 rc-service limedb start &>/dev/null
 
-[[ -n \"\$GRAFANA_CLOUD_USERNAME\" ]] && {
+[ -n \"\$GRAFANA_CLOUD_USERNAME\" ] && {
     rc-update add otel-collector default &>/dev/null
     rc-service otel-collector start &>/dev/null
 }
