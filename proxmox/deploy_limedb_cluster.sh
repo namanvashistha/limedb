@@ -50,11 +50,15 @@ for i in $(seq 1 $NUM_NODES); do
         echo ""
         echo "  Creating seed node..."
         
+        # Capture existing container IDs to detect the new one
+        EXISTING_IDS=$(pct list 2>/dev/null | awk 'NR>1 {print $1}' | sort)
+
         # Create seed node without peers
         bash "$TMP_SCRIPT"
         
-        # Get the container ID of the seed node (last created container)
-        SEED_CTID=$(pct list 2>/dev/null | awk 'NR>1 {print $1}' | sort -n | tail -1)
+        # Identify the newly created container ID
+        NEW_IDS=$(pct list 2>/dev/null | awk 'NR>1 {print $1}' | sort)
+        SEED_CTID=$(comm -13 <(echo "$EXISTING_IDS") <(echo "$NEW_IDS") | head -n 1)
         CONTAINER_IDS+=($SEED_CTID)
         
         # Wait for container to be fully ready
@@ -86,11 +90,15 @@ for i in $(seq 1 $NUM_NODES); do
         echo ""
         echo "  Creating peer node..."
         
+        # Capture existing container IDs to detect the new one
+        EXISTING_IDS=$(pct list 2>/dev/null | awk 'NR>1 {print $1}' | sort)
+
         # Create peer node connected to seed
         bash "$TMP_SCRIPT" --peers "$SEED_NODE_URL"
         
-        # Get the container ID of this node
-        PEER_CTID=$(pct list 2>/dev/null | awk 'NR>1 {print $1}' | sort -n | tail -1)
+        # Identify the newly created container ID
+        NEW_IDS=$(pct list 2>/dev/null | awk 'NR>1 {print $1}' | sort)
+        PEER_CTID=$(comm -13 <(echo "$EXISTING_IDS") <(echo "$NEW_IDS") | head -n 1)
         CONTAINER_IDS+=($PEER_CTID)
         
         echo "✓ Node $NODE_NUM created successfully"
