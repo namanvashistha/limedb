@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -18,11 +19,35 @@ type Config struct {
 
 // Load parses command line arguments and returns the configuration.
 func Load() *Config {
-	serverPort := flag.Int("server.port", 8484, "Server Port")
-	nodeUrl := flag.String("node.url", "", "This node's URL (REQUIRED, e.g., http://192.168.1.125:8484)")
-	peersStr := flag.String("node.peers", "", "Comma-separated list of peer URLs")
-	virtualNodes := flag.Int("node.routing.virtual-nodes", 256, "Number of virtual nodes per physical node")
-	otelEndpoint := flag.String("otel.endpoint", "localhost:4317", "OTLP Collector Endpoint (e.g., localhost:4317)")
+	// Helper functions to get env var or fallback
+	getEnv := func(key, fallback string) string {
+		if value, ok := os.LookupEnv(key); ok {
+			return value
+		}
+		return fallback
+	}
+
+	getEnvInt := func(key string, fallback int) int {
+		if valueStr, ok := os.LookupEnv(key); ok {
+			if parsed, err := strconv.Atoi(valueStr); err == nil {
+				return parsed
+			}
+		}
+		return fallback
+	}
+
+	// Read from ENV or use defaults
+	defaultPort := getEnvInt("SERVER_PORT", 8484)
+	defaultNodeUrl := getEnv("NODE_URL", "")
+	defaultPeers := getEnv("NODE_PEERS", "")
+	defaultVirtualNodes := getEnvInt("VIRTUAL_NODES", 256)
+	defaultOtel := getEnv("OTEL_ENDPOINT", "localhost:4317")
+
+	serverPort := flag.Int("server.port", defaultPort, "Server Port")
+	nodeUrl := flag.String("node.url", defaultNodeUrl, "This node's URL (REQUIRED, e.g., http://192.168.1.125:8484)")
+	peersStr := flag.String("node.peers", defaultPeers, "Comma-separated list of peer URLs")
+	virtualNodes := flag.Int("node.routing.virtual-nodes", defaultVirtualNodes, "Number of virtual nodes per physical node")
+	otelEndpoint := flag.String("otel.endpoint", defaultOtel, "OTLP Collector Endpoint (e.g., localhost:4317)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n", os.Args[0])
