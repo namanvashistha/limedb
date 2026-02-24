@@ -2,8 +2,8 @@ services:
   node1:
     build: .
     restart: unless-stopped
-    ports:
-      - "${APP_PORT:-8484}:8484"
+    expose:
+      - "8484"
     volumes:
       - limedb_node1_data:/data
     environment:
@@ -41,12 +41,22 @@ services:
       context: ./web
       dockerfile: Dockerfile
     restart: unless-stopped
-    ports:
-      - "${WEB_PORT:-3000}:3000"
+    expose:
+      - "3000"
     environment:
       - LIMEDB_SEED_URL=http://node1:8484
     depends_on:
       - node1
+    networks:
+      - default
+      - caddy
+    labels:
+      caddy: limedb.namanvashistha.com
+      caddy.reverse_proxy: "{{upstreams 3000}}"
+
+networks:
+  caddy:
+    external: true
 
 volumes:
   limedb_node1_data:
