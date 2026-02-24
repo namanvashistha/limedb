@@ -51,7 +51,7 @@ services:
       - default
       - caddy
     labels:
-      caddy: limedb.namanvashistha.com
+      caddy: http://limedb.namanvashistha.com
       caddy.reverse_proxy: "{{upstreams 3000}}"
 
 networks:
