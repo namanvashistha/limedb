@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const SEED_URL = process.env.LIMEDB_SEED_URL || "http://localhost:8484";
+console.log("🔥 [DEBUG] SEED_URL resolved to:", SEED_URL);
+
 const API_BASE = `${SEED_URL}/api/v1`;
 
 async function proxyRequest(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
