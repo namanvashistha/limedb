@@ -1,7 +1,18 @@
 {
-  "name": "web",
+  "name": "@namanvashistha/limedb-dashboard",
   "version": "0.1.0",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/namanvashistha/limedb.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "files": [
+    "public",
+    ".next/standalone",
+    ".next/static"
+  ],
   "scripts": {
     "dev": "next dev",
     "build": "next build",
