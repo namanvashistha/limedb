@@ -1,9 +1,8 @@
 name: Publish Next.js App to GitHub Packages
 
 on:
-  push:
-    tags:
-      - 'v*' # Trigger when pushing tags like v1.0.0
+  release:
+    types: [published]
 
 jobs:
   build-and-publish:
