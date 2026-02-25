@@ -13,7 +13,7 @@ import { api } from "@/lib/api";
 export function SettingsPanel() {
   const [refreshInterval, setRefreshInterval] = useState(2000);
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const [seedUrl, setSeedUrl] = useState("http://localhost:8484");
+  const [seedUrl, setSeedUrl] = useState("http://node1:8484");
 
   useEffect(() => {
     const savedSettings = localStorage.getItem("limedb_settings");
@@ -103,7 +103,7 @@ export function SettingsPanel() {
                 id="seed-url"
                 value={seedUrl}
                 onChange={(e) => setSeedUrl(e.target.value)}
-                placeholder="http://localhost:8484"
+                placeholder="http://node1:8484"
               />
             </div>
           </CardContent>

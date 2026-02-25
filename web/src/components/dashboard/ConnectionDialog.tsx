@@ -67,7 +67,7 @@ export function ConnectionDialog() {
               id="url"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="http://localhost:8484"
+              placeholder="http://node1:8484"
               className="col-span-3"
             />
           </div>

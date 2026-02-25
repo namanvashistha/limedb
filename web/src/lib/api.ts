@@ -6,7 +6,7 @@ class ClusterClient {
   private discoveredHosts: Set<string> = new Set();
   private seedUrl: string;
 
-  constructor(seedUrl: string = "http://localhost:8484") {
+  constructor(seedUrl: string = "http://node1:8484") {
     this.seedUrl = seedUrl;
     this.discoveredHosts.add(seedUrl);
   }
