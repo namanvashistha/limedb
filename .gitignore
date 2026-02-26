@@ -34,3 +34,4 @@ app/bin
 
 # Others
 .DS_Store
+tmp/

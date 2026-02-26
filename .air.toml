@@ -1,0 +1,13 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/limedb ./cmd/server/main.go"
+  bin = "./tmp/limedb"
+  full_bin = "./tmp/limedb"
+  include_ext = ["go"]
+  exclude_dir  = ["tmp", "web", "tui", "docs", "build", "scripts"]
+  delay = 500
+
+[log]
+  time = true
