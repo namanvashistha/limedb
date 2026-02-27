@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"limedb/internal/ring"
+	"limedb/internal/store"
 	"time"
 
 	"github.com/valyala/fasthttp"
@@ -25,12 +26,12 @@ type SetRequest struct {
 type NodeService struct {
 	currentNodeUrl string
 	ring           *ring.ConsistentHashRing
-	store          *Store
+	store          store.Backend
 	client         *fasthttp.Client
 }
 
-// New creates a new NodeService.
-func NewService(nodeUrl string, virtualNodes int, peers []string) *NodeService {
+// NewService creates a new NodeService with an injected store backend.
+func NewService(nodeUrl string, virtualNodes int, peers []string, s store.Backend) *NodeService {
 	currentNodeUrl := nodeUrl
 
 	r := ring.New(virtualNodes)
@@ -46,7 +47,7 @@ func NewService(nodeUrl string, virtualNodes int, peers []string) *NodeService {
 	return &NodeService{
 		currentNodeUrl: currentNodeUrl,
 		ring:           r,
-		store:          NewStore(),
+		store:          s,
 		client:         &fasthttp.Client{MaxConnsPerHost: 1000},
 	}
 }
@@ -110,8 +111,8 @@ func (s *NodeService) GetCurrentNodeUrl() string {
 	return s.currentNodeUrl
 }
 
-// GetStore returns the underlying store for direct access.
-func (s *NodeService) GetStore() *Store {
+// GetStore returns the underlying store backend.
+func (s *NodeService) GetStore() store.Backend {
 	return s.store
 }
 

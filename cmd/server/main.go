@@ -9,6 +9,7 @@ import (
 	"limedb/internal/messenger"
 	"limedb/internal/node"
 	"limedb/internal/server"
+	"limedb/internal/store"
 	"limedb/internal/telemetry"
 	"log"
 	"os"
@@ -65,6 +66,7 @@ func main() {
 		cfg.NodeUrl,
 		cfg.VirtualNodes,
 		cfg.Peers,
+		store.NewXYZ(), // swap for store.NewXYZ() or future store.NewBadger() for durable storage
 	)
 
 	// Initialize Gossiper (only if we have peers)
