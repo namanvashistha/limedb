@@ -12,8 +12,11 @@ import (
 	"limedb/internal/store"
 	"limedb/internal/telemetry"
 	"log"
+	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -60,13 +63,32 @@ func main() {
 		logger.Info("Single node mode - no peers configured")
 	}
 
+	// Initialize Store
+	// Derive node ID from URL (e.g. "http://node1:8484" → "node1")
+	nodeID := cfg.NodeUrl
+	if u, err := url.Parse(cfg.NodeUrl); err == nil {
+		nodeID = strings.Split(u.Hostname(), ".")[0] // e.g. "node1"
+	}
+	storeFilePath := filepath.Join(cfg.DataDir, nodeID+".json")
+	logger.Info("💾 Initializing filesystem store", "path", storeFilePath)
+
+	var backend store.Backend
+	fsStore, err := store.NewFileSystem(storeFilePath)
+	if err != nil {
+		logger.Info("⚠️  Filesystem store failed, falling back to memory store", "error", err.Error())
+		backend = store.NewMemory()
+	} else {
+		logger.Info("✅ Filesystem store ready", "path", storeFilePath, "keys", fsStore.Count())
+		backend = fsStore
+	}
+
 	// Initialize Node Service
 	logger.Info("🔧 Initializing node service")
 	svc := node.NewService(
 		cfg.NodeUrl,
 		cfg.VirtualNodes,
 		cfg.Peers,
-		store.NewMemory(),
+		backend,
 	)
 
 	// Initialize Gossiper (only if we have peers)

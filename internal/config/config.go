@@ -15,6 +15,7 @@ type Config struct {
 	Peers        []string
 	VirtualNodes int
 	OtelEndpoint string
+	DataDir      string // directory for persistent store files
 }
 
 // Load parses command line arguments and returns the configuration.
@@ -42,12 +43,14 @@ func Load() *Config {
 	defaultPeers := getEnv("NODE_PEERS", "")
 	defaultVirtualNodes := getEnvInt("VIRTUAL_NODES", 256)
 	defaultOtel := getEnv("OTEL_ENDPOINT", "localhost:4317")
+	defaultDataDir := getEnv("DATA_DIR", "/app/data")
 
 	serverPort := flag.Int("server.port", defaultPort, "Server Port")
 	nodeUrl := flag.String("node.url", defaultNodeUrl, "This node's URL (REQUIRED, e.g., http://192.168.1.125:8484)")
 	peersStr := flag.String("node.peers", defaultPeers, "Comma-separated list of peer URLs")
 	virtualNodes := flag.Int("node.routing.virtual-nodes", defaultVirtualNodes, "Number of virtual nodes per physical node")
 	otelEndpoint := flag.String("otel.endpoint", defaultOtel, "OTLP Collector Endpoint (e.g., localhost:4317)")
+	dataDir := flag.String("data.dir", defaultDataDir, "Directory for persistent store JSON files")
 
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n", os.Args[0])
@@ -123,5 +126,6 @@ func Load() *Config {
 		Peers:        validPeers,
 		VirtualNodes: *virtualNodes,
 		OtelEndpoint: *otelEndpoint,
+		DataDir:      *dataDir,
 	}
 }

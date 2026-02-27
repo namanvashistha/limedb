@@ -36,3 +36,6 @@ app/bin
 .DS_Store
 tmp/
 debug.go
+
+# Node store files (persistent data, local only)
+data/*.json

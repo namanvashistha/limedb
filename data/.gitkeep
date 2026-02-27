@@ -1,0 +1,2 @@
+# data directory is used by make dev for persistent store files
+# each node writes: data/node1.json, data/node2.json, etc.
