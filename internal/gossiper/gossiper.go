@@ -111,8 +111,8 @@ func (g *Gossiper) HandleGossip(requestBody []byte) map[string]interface{} {
 	}
 }
 func (g *Gossiper) StartGossiping() {
-	gossipTicker := time.NewTicker(15 * time.Second)
-	summaryTicker := time.NewTicker(60 * time.Second)
+	gossipTicker := time.NewTicker(60 * time.Second)
+	summaryTicker := time.NewTicker(600 * time.Second)
 
 	go func() {
 		for {

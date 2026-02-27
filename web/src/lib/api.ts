@@ -105,6 +105,41 @@ class ClusterClient {
     return res.json();
   }
 
+  // Fetch keys from a specific node URL
+  async listKeysFromNode(nodeUrl: string, page: number = 1, pageSize: number = 200): Promise<{
+    keys: Array<{ key: string; value: string; size: number; nodeUrl: string }>;
+    total: number;
+  }> {
+    const query = `&node=${encodeURIComponent(nodeUrl)}`;
+    const res = await fetch(`${BASE_URL}/keys?page=${page}&pageSize=${pageSize}${query}`);
+    if (!res.ok) throw new Error(`Failed to fetch keys from ${nodeUrl}`);
+    const data = await res.json();
+    return {
+      keys: (data.keys || []).map((k: { key: string; value: string; size: number }) => ({ ...k, nodeUrl })),
+      total: data.total || 0,
+    };
+  }
+
+  // Fan out to all discovered nodes, merge and deduplicate by key
+  async listAllKeys(): Promise<Array<{ key: string; value: string; size: number; nodeUrl: string }>> {
+    const nodes = await this.discoverCluster();
+    const results = await Promise.allSettled(
+      nodes.map((nodeUrl) => this.listKeysFromNode(nodeUrl))
+    );
+
+    const seen = new Map<string, { key: string; value: string; size: number; nodeUrl: string }>();
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        for (const item of result.value.keys) {
+          if (!seen.has(item.key)) {
+            seen.set(item.key, item);
+          }
+        }
+      }
+    }
+    return Array.from(seen.values()).sort((a, b) => a.key.localeCompare(b.key));
+  }
+
   async getKey(key: string): Promise<KeyValueResponse> {
     const query = `?node=${encodeURIComponent(this.seedUrl)}`;
     const res = await fetch(`${BASE_URL}/get/${key}${query}`);

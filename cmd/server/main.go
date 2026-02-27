@@ -66,7 +66,7 @@ func main() {
 		cfg.NodeUrl,
 		cfg.VirtualNodes,
 		cfg.Peers,
-		store.NewXYZ(), // swap for store.NewXYZ() or future store.NewBadger() for durable storage
+		store.NewMemory(),
 	)
 
 	// Initialize Gossiper (only if we have peers)

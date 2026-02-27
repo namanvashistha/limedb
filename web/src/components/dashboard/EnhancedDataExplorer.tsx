@@ -15,42 +15,119 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { api } from "@/lib/api";
-import { Database, Loader2, ChevronLeft, ChevronRight, Play, Trash2, Edit } from "lucide-react";
+import { Database, Loader2, ChevronLeft, ChevronRight, Play, Trash2, Edit, RefreshCw, Layers, Zap, X } from "lucide-react";
+
+import { faker } from "@faker-js/faker";
+
+function loremKey() {
+  return `${faker.word.adjective()}-${faker.animal.type()}-${faker.number.int({ min: 1, max: 9999 })}`;
+}
+function loremValue() {
+  return faker.hacker.phrase();
+}
 
 interface KeyData {
   key: string;
   value: string;
   size: number;
+  nodeUrl?: string;
 }
 
+type Operation = "GET" | "SET" | "DEL";
+
+// Stable color per node URL based on index
+const NODE_COLORS = [
+  "bg-blue-500",
+  "bg-green-500",
+  "bg-purple-500",
+  "bg-orange-500",
+  "bg-pink-500",
+  "bg-teal-500",
+];
+
+function NodeBadge({ nodeUrl, colorIndex }: { nodeUrl: string; colorIndex: number }) {
+  const label = nodeUrl.replace(/^https?:\/\//, "").replace(/:8484$/, "");
+  const color = NODE_COLORS[colorIndex % NODE_COLORS.length];
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs font-mono text-white px-2 py-0.5 rounded-full ${color}`}>
+      {label}
+    </span>
+  );
+}
+
+const ALL_NODES = "__all__";
+
 export function EnhancedDataExplorer() {
-  const [query, setQuery] = useState("");
+  // Query form state
+  const [operation, setOperation] = useState<Operation>("GET");
+  const [queryKey, setQueryKey] = useState("");
+  const [queryValue, setQueryValue] = useState("");
+  const [queryResult, setQueryResult] = useState<any>(null);
+
   const [allKeys, setAllKeys] = useState<KeyData[]>([]);
   const [filteredKeys, setFilteredKeys] = useState<KeyData[]>([]);
   const [loading, setLoading] = useState(false);
   const [executing, setExecuting] = useState(false);
-  const [queryResult, setQueryResult] = useState<any>(null);
-  
+  const [filterQuery, setFilterQuery] = useState("");
+
+  // Node switcher
+  const [selectedNode, setSelectedNode] = useState<string>(ALL_NODES);
+  const [discoveredNodes, setDiscoveredNodes] = useState<string[]>([]);
+  const [nodeColorMap, setNodeColorMap] = useState<Map<string, number>>(new Map());
+
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize] = useState(20);
-  
+  const pageSize = 20;
+
   // Edit mode
+
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
 
-  const loadAllKeys = useCallback(async () => {
+  // Seed state
+  const [showSeed, setShowSeed] = useState(false);
+  const [seedCount, setSeedCount] = useState(100);
+  const [seeding, setSeeding] = useState(false);
+  const [seedProgress, setSeedProgress] = useState(0);
+
+  // Discover nodes on mount
+  useEffect(() => {
+    api.discoverCluster().then((nodes) => {
+      setDiscoveredNodes(nodes);
+      const map = new Map<string, number>();
+      nodes.forEach((n, i) => map.set(n, i));
+      setNodeColorMap(map);
+    });
+  }, []);
+
+  const loadKeys = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await api.listKeys(currentPage, pageSize);
-      const keys: KeyData[] = response.keys.map(k => ({
-        key: k.key,
-        value: k.value,
-        size: k.size
-      }));
-      
+      let keys: KeyData[] = [];
+
+      if (selectedNode === ALL_NODES) {
+        // Fan-out to all discovered nodes
+        const result = await api.listAllKeys();
+        keys = result.map((k) => ({
+          key: k.key,
+          value: k.value,
+          size: k.size,
+          nodeUrl: k.nodeUrl,
+        }));
+      } else {
+        // Single node
+        const result = await api.listKeysFromNode(selectedNode);
+        keys = result.keys.map((k) => ({
+          key: k.key,
+          value: k.value,
+          size: k.size,
+          nodeUrl: selectedNode,
+        }));
+      }
+
       setAllKeys(keys);
       setFilteredKeys(keys);
+      setCurrentPage(1);
     } catch (error) {
       console.error("Failed to load keys:", error);
       setAllKeys([]);
@@ -58,54 +135,42 @@ export function EnhancedDataExplorer() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, pageSize]);
+  }, [selectedNode]);
 
-  // Load all keys on mount and when page changes
+  // Reload when selected node changes
   useEffect(() => {
-    loadAllKeys();
-  }, [loadAllKeys]);
+    loadKeys();
+  }, [loadKeys]);
 
-  // Filter keys when query changes  
+  // Client-side filter
   useEffect(() => {
-    if (!query.trim()) {
+    if (!filterQuery.trim()) {
       setFilteredKeys(allKeys);
     } else {
-      const searchTerm = query.toLowerCase();
-      setFilteredKeys(
-        allKeys.filter(k => k.key.toLowerCase().includes(searchTerm))
-      );
+      const term = filterQuery.toLowerCase();
+      setFilteredKeys(allKeys.filter((k) => k.key.toLowerCase().includes(term)));
     }
     setCurrentPage(1);
-  }, [query, allKeys]);
+  }, [filterQuery, allKeys]);
 
   const executeQuery = async () => {
-    const trimmed = query.trim();
-    if (!trimmed) return;
-
+    if (!queryKey.trim()) return;
     setExecuting(true);
     setQueryResult(null);
-
     try {
-      const parts = trimmed.split(/\s+/);
-      const command = parts[0].toUpperCase();
-      const key = parts[1];
-
-      if (command === "GET" && key) {
-        const res = await api.getKey(key);
-        setQueryResult({ command: "GET", key, result: res });
-      } else if (command === "SET" && key) {
-        const value = parts.slice(2).join(" ");
-        const res = await api.setKey(key, value);
-        setQueryResult({ command: "SET", key, value, result: res });
-        loadAllKeys(); // Refresh keys
-      } else if (command === "DEL" && key) {
-        const res = await api.deleteKey(key);
-        setQueryResult({ command: "DEL", key, result: res });
-        loadAllKeys(); // Refresh keys
-      } else {
-        setQueryResult({ error: "Invalid command. Use: GET key, SET key value, or DEL key" });
+      if (operation === "GET") {
+        const res = await api.getKey(queryKey);
+        setQueryResult({ operation: "GET", key: queryKey, result: res });
+      } else if (operation === "SET") {
+        const res = await api.setKey(queryKey, queryValue);
+        setQueryResult({ operation: "SET", key: queryKey, value: queryValue, result: res });
+        loadKeys();
+      } else if (operation === "DEL") {
+        const res = await api.deleteKey(queryKey);
+        setQueryResult({ operation: "DEL", key: queryKey, result: res });
+        loadKeys();
       }
-    } catch (error) {
+    } catch {
       setQueryResult({ error: "Query execution failed" });
     } finally {
       setExecuting(false);
@@ -116,11 +181,17 @@ export function EnhancedDataExplorer() {
     setExecuting(true);
     try {
       const res = await api.getKey(key);
-      const valueStr = typeof res.body === 'string' ? res.body : JSON.stringify(res.body);
-      // Update the key in the list with actual value
-      setAllKeys(prev => prev.map(k => 
-        k.key === key ? { ...k, value: valueStr, size: valueStr.length } : k
-      ));
+      // Extract the actual value field from the JSON response
+      let valueStr: string;
+      try {
+        const parsed = typeof res.body === "string" ? JSON.parse(res.body) : res.body;
+        valueStr = parsed?.value ?? (typeof res.body === "string" ? res.body : JSON.stringify(res.body));
+      } catch {
+        valueStr = typeof res.body === "string" ? res.body : JSON.stringify(res.body);
+      }
+      setAllKeys((prev) =>
+        prev.map((k) => (k.key === key ? { ...k, value: valueStr, size: valueStr.length } : k))
+      );
     } catch (error) {
       console.error("Failed to get key:", error);
     } finally {
@@ -130,11 +201,10 @@ export function EnhancedDataExplorer() {
 
   const handleDeleteKey = async (key: string) => {
     if (!confirm(`Delete key "${key}"?`)) return;
-    
     setExecuting(true);
     try {
       await api.deleteKey(key);
-      setAllKeys(prev => prev.filter(k => k.key !== key));
+      setAllKeys((prev) => prev.filter((k) => k.key !== key));
     } catch (error) {
       console.error("Failed to delete key:", error);
     } finally {
@@ -146,9 +216,9 @@ export function EnhancedDataExplorer() {
     setExecuting(true);
     try {
       await api.setKey(key, editValue);
-      setAllKeys(prev => prev.map(k => 
-        k.key === key ? { ...k, value: editValue, size: editValue.length } : k
-      ));
+      setAllKeys((prev) =>
+        prev.map((k) => (k.key === key ? { ...k, value: editValue, size: editValue.length } : k))
+      );
       setEditingKey(null);
       setEditValue("");
     } catch (error) {
@@ -158,15 +228,37 @@ export function EnhancedDataExplorer() {
     }
   };
 
+  const seedData = async () => {
+    setSeeding(true);
+    setSeedProgress(0);
+    const total = seedCount;
+    const batchSize = 10;
+    let done = 0;
+
+    for (let i = 0; i < total; i += batchSize) {
+      const batch = Array.from({ length: Math.min(batchSize, total - i) }, () => ({
+        key: loremKey() + "-" + Math.floor(Math.random() * 9999),
+        value: loremValue(),
+      }));
+      await Promise.all(batch.map((item) => api.setKey(item.key, item.value)));
+      done += batch.length;
+      setSeedProgress(Math.round((done / total) * 100));
+    }
+
+    setSeeding(false);
+    setShowSeed(false);
+    setSeedProgress(0);
+    loadKeys();
+  };
+
   // Pagination
   const totalPages = Math.ceil(filteredKeys.length / pageSize);
   const startIndex = (currentPage - 1) * pageSize;
-  const endIndex = startIndex + pageSize;
-  const currentKeys = filteredKeys.slice(startIndex, endIndex);
+  const currentKeys = filteredKeys.slice(startIndex, startIndex + pageSize);
 
   return (
     <div className="space-y-4">
-      {/* Query Input */}
+      {/* Structured Query Form */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -176,23 +268,54 @@ export function EnhancedDataExplorer() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex gap-2">
+            {/* Operation selector */}
+            <div className="flex rounded-md border overflow-hidden shrink-0">
+              {(["GET", "SET", "DEL"] as Operation[]).map((op) => (
+                <button
+                  key={op}
+                  onClick={() => setOperation(op)}
+                  className={`px-3 py-2 text-xs font-mono font-semibold transition-colors
+                    ${
+                      operation === op
+                        ? op === "GET"
+                          ? "bg-blue-500 text-white"
+                          : op === "SET"
+                          ? "bg-green-500 text-white"
+                          : "bg-red-500 text-white"
+                        : "bg-background text-muted-foreground hover:text-foreground"
+                    }`}
+                >
+                  {op}
+                </button>
+              ))}
+            </div>
+
+            {/* Key input */}
             <Input
-              placeholder='Enter query: "GET key1" or "SET key1 value" or "DEL key1"'
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                  executeQuery();
-                }
-              }}
-              className="font-mono"
+              placeholder="key"
+              value={queryKey}
+              onChange={(e) => setQueryKey(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && operation !== "SET") executeQuery(); }}
+              className="font-mono max-w-xs"
             />
-            <Button onClick={executeQuery} disabled={executing || !query.trim()}>
+
+            {/* Value input — only for SET */}
+            {operation === "SET" && (
+              <Input
+                placeholder="value"
+                value={queryValue}
+                onChange={(e) => setQueryValue(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") executeQuery(); }}
+                className="font-mono flex-1"
+              />
+            )}
+
+            <Button onClick={executeQuery} disabled={executing || !queryKey.trim()}>
               <Play className="h-4 w-4 mr-2" />
-              Execute
+              Run
             </Button>
           </div>
-          
+
           {queryResult && (
             <div className="rounded-md border bg-muted p-4">
               <pre className="text-xs font-mono overflow-auto">
@@ -203,21 +326,127 @@ export function EnhancedDataExplorer() {
         </CardContent>
       </Card>
 
-      {/* All Keys Table */}
+      {/* Keys Table */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-3">
             <CardTitle className="flex items-center gap-2">
               <Database className="h-5 w-5" />
               Documents
               <Badge variant="outline">{filteredKeys.length}</Badge>
             </CardTitle>
-            <Button variant="outline" size="sm" onClick={loadAllKeys} disabled={loading}>
-              <Loader2 className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
-              Refresh
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => { setShowSeed((v) => !v); setSeedProgress(0); }}
+              className="text-xs"
+            >
+              <Zap className="h-3.5 w-3.5 mr-1.5" />
+              Seed Data
             </Button>
+
+            {/* Node Switcher + Search */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <Input
+                placeholder="Filter keys…"
+                value={filterQuery}
+                onChange={(e) => setFilterQuery(e.target.value)}
+                className="font-mono h-8 w-40 text-xs"
+              />
+              <Layers className="h-4 w-4 text-muted-foreground shrink-0" />
+              {/* All Nodes pill */}
+              <button
+                onClick={() => setSelectedNode(ALL_NODES)}
+                className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors
+                  ${selectedNode === ALL_NODES
+                    ? "bg-foreground text-background border-foreground"
+                    : "bg-background text-muted-foreground border-border hover:border-foreground hover:text-foreground"
+                  }`}
+              >
+                All Nodes
+              </button>
+
+              {/* Per-node pills */}
+              {discoveredNodes.map((nodeUrl) => {
+                const colorIdx = nodeColorMap.get(nodeUrl) ?? 0;
+                const color = NODE_COLORS[colorIdx % NODE_COLORS.length];
+                const label = nodeUrl.replace(/^https?:\/\//, "").replace(/:8484$/, "");
+                const isSelected = selectedNode === nodeUrl;
+                return (
+                  <button
+                    key={nodeUrl}
+                    onClick={() => setSelectedNode(nodeUrl)}
+                    className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors
+                      ${isSelected
+                        ? `${color} text-white border-transparent`
+                        : "bg-background text-muted-foreground border-border hover:border-foreground hover:text-foreground"
+                      }`}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? "bg-white" : color}`} />
+                    {label}
+                  </button>
+                );
+              })}
+
+              <Button variant="outline" size="sm" onClick={loadKeys} disabled={loading}>
+                <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              </Button>
+            </div>
           </div>
         </CardHeader>
+
+        {/* Seed Data Panel */}
+        {showSeed && (
+          <div className="mx-6 mb-4 rounded-lg border bg-muted/50 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium">Generate random Lorem keys & values</p>
+              <button onClick={() => setShowSeed(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <label className="text-xs text-muted-foreground whitespace-nowrap">Count</label>
+              <Input
+                type="number"
+                min={1}
+                max={1000}
+                value={seedCount}
+                onChange={(e) => setSeedCount(Math.max(1, Math.min(1000, Number(e.target.value))))}
+                className="w-24 h-8 text-sm"
+                disabled={seeding}
+              />
+              <Button
+                size="sm"
+                onClick={seedData}
+                disabled={seeding}
+                className="bg-amber-500 hover:bg-amber-600 text-white"
+              >
+                {seeding ? (
+                  <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> {seedProgress}%</>
+                ) : (
+                  <><Zap className="h-3.5 w-3.5 mr-1.5" /> Generate</>
+                )}
+              </Button>
+            </div>
+
+            {/* Progress bar */}
+            {seeding && (
+              <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
+                <div
+                  className="h-1.5 bg-amber-500 transition-all duration-300 rounded-full"
+                  style={{ width: `${seedProgress}%` }}
+                />
+              </div>
+            )}
+
+            <p className="text-xs text-muted-foreground font-mono">
+              e.g. key: <span className="text-foreground">ipsum-dolor-4821</span> → value: <span className="text-foreground">lorem sit amet consectetur adipiscing elit.</span>
+            </p>
+          </div>
+        )}
+
         <CardContent>
           {loading ? (
             <div className="flex items-center justify-center h-64">
@@ -235,9 +464,12 @@ export function EnhancedDataExplorer() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[300px]">Key</TableHead>
+                      <TableHead className="w-[280px]">Key</TableHead>
+                      {selectedNode === ALL_NODES && (
+                        <TableHead className="w-[120px]">Node</TableHead>
+                      )}
                       <TableHead>Value</TableHead>
-                      <TableHead className="w-[100px]">Size</TableHead>
+                      <TableHead className="w-[80px]">Size</TableHead>
                       <TableHead className="w-[150px] text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -247,6 +479,18 @@ export function EnhancedDataExplorer() {
                         <TableCell className="font-mono text-sm font-medium">
                           {item.key}
                         </TableCell>
+
+                        {selectedNode === ALL_NODES && (
+                          <TableCell>
+                            {item.nodeUrl && (
+                              <NodeBadge
+                                nodeUrl={item.nodeUrl}
+                                colorIndex={nodeColorMap.get(item.nodeUrl) ?? 0}
+                              />
+                            )}
+                          </TableCell>
+                        )}
+
                         <TableCell>
                           {editingKey === item.key ? (
                             <Textarea
@@ -261,58 +505,31 @@ export function EnhancedDataExplorer() {
                             </div>
                           )}
                         </TableCell>
+
                         <TableCell className="text-sm text-muted-foreground">
                           {item.size > 0 ? `${item.size}B` : "-"}
                         </TableCell>
+
                         <TableCell className="text-right">
                           <div className="flex gap-1 justify-end">
                             {editingKey === item.key ? (
                               <>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleSaveEdit(item.key)}
-                                  disabled={executing}
-                                >
+                                <Button variant="ghost" size="sm" onClick={() => handleSaveEdit(item.key)} disabled={executing}>
                                   Save
                                 </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => {
-                                    setEditingKey(null);
-                                    setEditValue("");
-                                  }}
-                                >
+                                <Button variant="ghost" size="sm" onClick={() => { setEditingKey(null); setEditValue(""); }}>
                                   Cancel
                                 </Button>
                               </>
                             ) : (
                               <>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleGetKey(item.key)}
-                                  disabled={executing}
-                                >
+                                <Button variant="ghost" size="sm" onClick={() => handleGetKey(item.key)} disabled={executing}>
                                   View
                                 </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => {
-                                    setEditingKey(item.key);
-                                    setEditValue(item.value);
-                                  }}
-                                >
+                                <Button variant="ghost" size="sm" onClick={() => { setEditingKey(item.key); setEditValue(item.value); }}>
                                   <Edit className="h-4 w-4" />
                                 </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleDeleteKey(item.key)}
-                                  disabled={executing}
-                                >
+                                <Button variant="ghost" size="sm" onClick={() => handleDeleteKey(item.key)} disabled={executing}>
                                   <Trash2 className="h-4 w-4 text-destructive" />
                                 </Button>
                               </>
@@ -329,28 +546,16 @@ export function EnhancedDataExplorer() {
               {totalPages > 1 && (
                 <div className="flex items-center justify-between mt-4">
                   <div className="text-sm text-muted-foreground">
-                    Showing {startIndex + 1}-{Math.min(endIndex, filteredKeys.length)} of {filteredKeys.length}
+                    Showing {startIndex + 1}–{Math.min(startIndex + pageSize, filteredKeys.length)} of {filteredKeys.length}
                   </div>
                   <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                      disabled={currentPage === 1}
-                    >
+                    <Button variant="outline" size="sm" onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1}>
                       <ChevronLeft className="h-4 w-4" />
                     </Button>
-                    <div className="flex items-center gap-1">
-                      <span className="text-sm">
-                        Page {currentPage} of {totalPages}
-                      </span>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                      disabled={currentPage === totalPages}
-                    >
+                    <span className="text-sm flex items-center">
+                      Page {currentPage} of {totalPages}
+                    </span>
+                    <Button variant="outline" size="sm" onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>
                       <ChevronRight className="h-4 w-4" />
                     </Button>
                   </div>
