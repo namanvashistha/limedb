@@ -22,6 +22,9 @@ dev-logs:
 dev-down:
 	docker compose -f docker-compose.dev.yml down --remove-orphans
 
+debug:
+	go run debug.go -node.url http://node5:8484 -node.peers http://node1:8484
+
 # --- Production ---
 
 prod:

@@ -1,19 +1,19 @@
 package ring
 
 import (
-	"crypto/md5"
-	"encoding/binary"
 	"fmt"
 	"math"
 	"sort"
 	"sync"
+
+	"github.com/cespare/xxhash"
 )
 
 // ConsistentHashRing manages consistent hashing for distributed key-value storage.
 type ConsistentHashRing struct {
 	mu                  sync.RWMutex
-	ring                map[int64]string // hash -> nodeUrl
-	sortedHashes        []int64          // sorted keys of the ring for binary search
+	ring                map[uint64]string // hash -> nodeUrl
+	sortedHashes        []uint64          // sorted keys of the ring for binary search
 	virtualNodesPerNode int
 	nodes               map[string]bool // Set of physical nodes
 }
@@ -21,7 +21,7 @@ type ConsistentHashRing struct {
 // New creates a new hash ring.
 func New(virtualNodesPerNode int) *ConsistentHashRing {
 	return &ConsistentHashRing{
-		ring:                make(map[int64]string),
+		ring:                make(map[uint64]string),
 		virtualNodesPerNode: virtualNodesPerNode,
 		nodes:               make(map[string]bool),
 	}
@@ -62,8 +62,8 @@ func (r *ConsistentHashRing) RemoveNode(nodeUrl string) {
 	delete(r.nodes, nodeUrl)
 
 	// Rebuild ring and sortedHashes to remove all virtual nodes
-	newRing := make(map[int64]string)
-	var newSortedHashes []int64
+	newRing := make(map[uint64]string)
+	var newSortedHashes []uint64
 
 	for h, url := range r.ring {
 		if url != nodeUrl {
@@ -89,6 +89,7 @@ func (r *ConsistentHashRing) GetNode(key string) string {
 	}
 
 	h := r.hash(key)
+	fmt.Println(h)
 
 	// Binary search for the first node with hash >= h
 	idx := sort.Search(len(r.sortedHashes), func(i int) bool {
@@ -152,7 +153,7 @@ func (r *ConsistentHashRing) GetNodeRanges() map[string][]map[string]interface{}
 	for i, currentHash := range r.sortedHashes {
 		currentNode := r.ring[currentHash]
 
-		var rangeStart int64
+		var rangeStart uint64
 		if i == 0 {
 			// First node wraps around from the last node
 			lastHash := r.sortedHashes[len(r.sortedHashes)-1]
@@ -202,7 +203,7 @@ func (r *ConsistentHashRing) GetNodeRangesDegrees() map[string][]map[string]inte
 	for i, currentHash := range r.sortedHashes {
 		currentNode := r.ring[currentHash]
 
-		var rangeStart int64
+		var rangeStart uint64
 		if i == 0 {
 			lastHash := r.sortedHashes[len(r.sortedHashes)-1]
 			rangeStart = lastHash + 1
@@ -237,10 +238,6 @@ func (r *ConsistentHashRing) GetNodeRangesDegrees() map[string][]map[string]inte
 	return nodeRanges
 }
 
-// hash computes the MD5 hash of the key and returns the first 8 bytes as int64.
-func (r *ConsistentHashRing) hash(key string) int64 {
-	sum := md5.Sum([]byte(key))
-	// Read as uint64 first, then cast to int64 to get the same bit pattern as Java's long
-	u := binary.BigEndian.Uint64(sum[:8])
-	return int64(u)
+func (r *ConsistentHashRing) hash(key string) uint64 {
+	return xxhash.Sum64String(key)
 }
