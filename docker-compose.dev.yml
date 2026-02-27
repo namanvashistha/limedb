@@ -12,6 +12,7 @@ services:
       - SERVER_PORT=8484
       - NODE_URL=http://node1:8484
       - NODE_PEERS=http://node2:8484
+      - VIRTUAL_NODES=0
       - OTEL_ENDPOINT=
       - DATA_DIR=/app/data
 
@@ -28,6 +29,7 @@ services:
       - SERVER_PORT=8484
       - NODE_URL=http://node2:8484
       - NODE_PEERS=http://node3:8484
+      - VIRTUAL_NODES=0
       - OTEL_ENDPOINT=
       - DATA_DIR=/app/data
 
@@ -43,7 +45,8 @@ services:
     environment:
       - SERVER_PORT=8484
       - NODE_URL=http://node3:8484
-      - NODE_PEERS=http://node4:8484
+      - NODE_PEERS=http://node2:8484
+      - VIRTUAL_NODES=0
       - OTEL_ENDPOINT=
       - DATA_DIR=/app/data
 
@@ -60,6 +63,7 @@ services:
       - SERVER_PORT=8484
       - NODE_URL=http://node4:8484
       - NODE_PEERS=http://node1:8484
+      - VIRTUAL_NODES=0
       - OTEL_ENDPOINT=
       - DATA_DIR=/app/data
 

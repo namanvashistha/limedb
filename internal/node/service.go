@@ -3,6 +3,7 @@ package node
 import (
 	"encoding/json"
 	"fmt"
+	"limedb/internal/logger"
 	"limedb/internal/ring"
 	"limedb/internal/store"
 	"time"
@@ -86,6 +87,10 @@ func (s *NodeService) SyncWithGossip(activePeers []string) {
 			continue
 		}
 		if !currentNodes[peer] {
+			logger.Info("🔵 Ring expanded: new peer discovered via gossip",
+				"new_peer", peer,
+				"ring_size_before", len(currentNodes),
+			)
 			s.ring.AddNode(peer)
 		}
 	}
@@ -131,7 +136,14 @@ func (s *NodeService) HandleGet(key string) (*GetResponse, error) {
 
 // HandleSet handles a SET request, routing if necessary.
 func (s *NodeService) HandleSet(key, value string) error {
+	knownNodes := s.ring.GetNodes()
 	targetUrl := s.ring.GetNode(key)
+	logger.Info("SET routing",
+		"key", key,
+		"target", targetUrl,
+		"ring_size", len(knownNodes),
+		"known_nodes", fmt.Sprintf("%v", knownNodes),
+	)
 	if targetUrl == s.currentNodeUrl {
 		s.store.Set(key, value)
 		return nil

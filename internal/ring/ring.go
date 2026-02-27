@@ -38,7 +38,13 @@ func (r *ConsistentHashRing) AddNode(nodeUrl string) {
 
 	r.nodes[nodeUrl] = true
 
-	for i := 0; i < r.virtualNodesPerNode; i++ {
+	// Always add at least 1 slot so the node owns some hash space.
+	// VIRTUAL_NODES=0 means "1 real slot per node, no virtual replicas".
+	slots := r.virtualNodesPerNode
+	if slots == 0 {
+		slots = 1
+	}
+	for i := 0; i < slots; i++ {
 		virtualNodeKey := fmt.Sprintf("%s:%d", nodeUrl, i)
 		h := r.hash(virtualNodeKey)
 		r.ring[h] = nodeUrl
@@ -100,6 +106,7 @@ func (r *ConsistentHashRing) GetNode(key string) string {
 		// Wrap around
 		idx = 0
 	}
+	fmt.Println("FOUND IDX----", idx, r.sortedHashes, r.ring)
 
 	return r.ring[r.sortedHashes[idx]]
 }
