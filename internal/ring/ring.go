@@ -106,7 +106,6 @@ func (r *ConsistentHashRing) GetNode(key string) string {
 		// Wrap around
 		idx = 0
 	}
-	fmt.Println("FOUND IDX----", idx, r.sortedHashes, r.ring)
 
 	return r.ring[r.sortedHashes[idx]]
 }

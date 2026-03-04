@@ -38,4 +38,4 @@ tmp/
 debug.go
 
 # Node store files (persistent data, local only)
-data/*.json
+data/**/*.json

@@ -194,8 +194,6 @@ func (s *Server) handleSet(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	logger.Info("SET request", "key", req.Key, "size", len(req.Value))
-
 	if err := s.service.HandleSet(req.Key, req.Value); err != nil {
 		logger.Error("SET failed", "key", req.Key, "error", err.Error())
 		ctx.Error(err.Error(), fasthttp.StatusInternalServerError)

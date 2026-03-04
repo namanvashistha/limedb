@@ -3,7 +3,6 @@ package node
 import (
 	"encoding/json"
 	"fmt"
-	"limedb/internal/logger"
 	"limedb/internal/ring"
 	"limedb/internal/store"
 	"time"
@@ -53,49 +52,6 @@ func NewService(nodeUrl string, virtualNodes int, peers []string, s store.Backen
 	}
 }
 
-// SyncWithGossip updates the ring to match the active peers from gossip.
-// This should be called periodically to keep the ring in sync with the cluster state.
-func (s *NodeService) SyncWithGossip(activePeers []string) {
-	// Get current ring nodes
-	currentNodes := make(map[string]bool)
-	for _, node := range s.ring.GetNodes() {
-		currentNodes[node] = true
-	}
-
-	// Build map of active peers
-	activeNodes := make(map[string]bool)
-	for _, peer := range activePeers {
-		activeNodes[peer] = true
-	}
-
-	// Remove nodes that are no longer in gossip
-	for node := range currentNodes {
-		if !activeNodes[node] {
-			s.ring.RemoveNode(node)
-		}
-	}
-
-	// Always ensure current node is present
-	if !currentNodes[s.currentNodeUrl] {
-		s.ring.AddNode(s.currentNodeUrl)
-		currentNodes[s.currentNodeUrl] = true
-	}
-
-	// Add new nodes from gossip (excluding self which we already ensured)
-	for peer := range activeNodes {
-		if peer == s.currentNodeUrl {
-			continue
-		}
-		if !currentNodes[peer] {
-			logger.Info("🔵 Ring expanded: new peer discovered via gossip",
-				"new_peer", peer,
-				"ring_size_before", len(currentNodes),
-			)
-			s.ring.AddNode(peer)
-		}
-	}
-}
-
 // GetRing returns the underlying hash ring.
 func (s *NodeService) GetRing() *ring.ConsistentHashRing {
 	return s.ring
@@ -136,14 +92,7 @@ func (s *NodeService) HandleGet(key string) (*GetResponse, error) {
 
 // HandleSet handles a SET request, routing if necessary.
 func (s *NodeService) HandleSet(key, value string) error {
-	knownNodes := s.ring.GetNodes()
 	targetUrl := s.ring.GetNode(key)
-	logger.Info("SET routing",
-		"key", key,
-		"target", targetUrl,
-		"ring_size", len(knownNodes),
-		"known_nodes", fmt.Sprintf("%v", knownNodes),
-	)
 	if targetUrl == s.currentNodeUrl {
 		s.store.Set(key, value)
 		return nil

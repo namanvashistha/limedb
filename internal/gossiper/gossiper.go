@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"limedb/internal/logger"
 	"limedb/internal/messenger"
+	"limedb/internal/node"
+	"slices"
 	"sync"
 	"time"
 
@@ -18,9 +20,10 @@ type Gossiper struct {
 	peerHeartbeats map[string]int
 	messenger      *messenger.Messenger
 	mu             sync.Mutex
+	node           *node.NodeService
 }
 
-func NewGossiper(currentNodeUrl string, peers []string, messenger *messenger.Messenger) *Gossiper {
+func NewGossiper(currentNodeUrl string, peers []string, messenger *messenger.Messenger, node *node.NodeService) *Gossiper {
 	// Filter out self from peers
 	validPeers := make([]string, 0)
 	for _, peer := range peers {
@@ -40,6 +43,7 @@ func NewGossiper(currentNodeUrl string, peers []string, messenger *messenger.Mes
 		heartbeat:      0,
 		peerHeartbeats: peerHeartbeats,
 		messenger:      messenger,
+		node:           node,
 		mu:             sync.Mutex{},
 	}
 }
@@ -111,7 +115,7 @@ func (g *Gossiper) HandleGossip(requestBody []byte) map[string]interface{} {
 	}
 }
 func (g *Gossiper) StartGossiping() {
-	gossipTicker := time.NewTicker(60 * time.Second)
+	gossipTicker := time.NewTicker(30 * time.Second)
 	summaryTicker := time.NewTicker(600 * time.Second)
 
 	go func() {
@@ -429,6 +433,12 @@ func (g *Gossiper) handleSyn(payload SynPayload) AckPayload {
 		if digest.NodeURL == g.currentNodeUrl {
 			// Ignore self
 			continue
+		}
+		// add it in the ring if it is a new peer
+		nodes := g.node.GetRing().GetNodes()
+		alreadyInRing := slices.Contains(nodes, digest.NodeURL)
+		if !alreadyInRing {
+			g.node.GetRing().AddNode(digest.NodeURL)
 		}
 
 		localHeartbeat, exists := g.peerHeartbeats[digest.NodeURL]

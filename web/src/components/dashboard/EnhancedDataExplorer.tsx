@@ -77,7 +77,7 @@ export function EnhancedDataExplorer() {
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 20;
+  const pageSize = 100;
 
   // Edit mode
 
@@ -413,7 +413,7 @@ export function EnhancedDataExplorer() {
                 min={1}
                 max={1000}
                 value={seedCount}
-                onChange={(e) => setSeedCount(Math.max(1, Math.min(1000, Number(e.target.value))))}
+                onChange={(e) => setSeedCount(Math.max(1, Math.min(100000, Number(e.target.value))))}
                 className="w-24 h-8 text-sm"
                 disabled={seeding}
               />
