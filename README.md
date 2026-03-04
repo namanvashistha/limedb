@@ -9,6 +9,8 @@
 
 **LimeDB** is a **highly-scalable distributed key-value store**.
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/namanvashistha/limedb)
+
 It operates in a peer-to-peer architecture where any node can act as both coordinator and storage, eliminating single points of failure.
 
 Keys are consistently hashed across multiple nodes using virtual node topology for optimal load distribution and minimal data movement during cluster changes.
