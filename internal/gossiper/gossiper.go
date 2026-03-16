@@ -6,338 +6,100 @@ import (
 	"limedb/internal/logger"
 	"limedb/internal/messenger"
 	"limedb/internal/node"
+	"math/rand"
 	"slices"
 	"sync"
 	"time"
-
-	"math/rand"
 )
 
+// peerState holds the last-known generation and version for one remote endpoint.
+type peerState struct {
+	generation int64
+	version    int
+}
+
+// Gossiper implements SYN → ACK → ACK2 scuttlebutt reconciliation.
+//
+// Each node tracks:
+//   - its own (generation, version) — generation is set once at startup, version
+//     increments each gossip round.
+//   - a (generation, version) pair for every known peer, updated whenever fresher
+//     state arrives via gossip.
+//
+// Lag = peer's current version − our last-known version for that peer.
+// This is purely a per-endpoint comparison, independent of the local counter.
 type Gossiper struct {
 	currentNodeUrl string
-	peers          []string
-	heartbeat      int
-	peerHeartbeats map[string]int
-	messenger      *messenger.Messenger
-	mu             sync.Mutex
-	node           *node.NodeService
+	generation     int64 // Unix epoch seconds at this node's startup — never changes
+	version        int   // this node's own gossip round counter
+
+	peers      []string
+	peerStates map[string]peerState // keyed by peer URL
+	messenger  *messenger.Messenger
+	mu         sync.Mutex
+	node       *node.NodeService
 }
 
-func NewGossiper(currentNodeUrl string, peers []string, messenger *messenger.Messenger, node *node.NodeService) *Gossiper {
-	// Filter out self from peers
-	validPeers := make([]string, 0)
-	for _, peer := range peers {
-		if peer != currentNodeUrl {
-			validPeers = append(validPeers, peer)
+func NewGossiper(currentNodeUrl string, peers []string, msngr *messenger.Messenger, svc *node.NodeService) *Gossiper {
+	validPeers := make([]string, 0, len(peers))
+	for _, p := range peers {
+		if p != currentNodeUrl {
+			validPeers = append(validPeers, p)
 		}
 	}
-
-	peerHeartbeats := make(map[string]int)
-	for _, peer := range validPeers {
-		peerHeartbeats[peer] = 0
+	states := make(map[string]peerState, len(validPeers))
+	for _, p := range validPeers {
+		states[p] = peerState{}
 	}
-
 	return &Gossiper{
 		currentNodeUrl: currentNodeUrl,
+		generation:     time.Now().Unix(),
+		version:        0,
 		peers:          validPeers,
-		heartbeat:      0,
-		peerHeartbeats: peerHeartbeats,
-		messenger:      messenger,
-		node:           node,
-		mu:             sync.Mutex{},
+		peerStates:     states,
+		messenger:      msngr,
+		node:           svc,
 	}
 }
 
-func (g *Gossiper) HandleGossip(requestBody []byte) map[string]interface{} {
-	// Parse the incoming gossip message
-	var gossipMsg GossipMessage
-	if err := json.Unmarshal(requestBody, &gossipMsg); err != nil {
-		logger.Error("Invalid gossip message JSON",
-			"error", err.Error(),
-			"request_size", len(requestBody),
-		)
-		return map[string]interface{}{"error": "Invalid JSON"}
-	}
-
-	logger.Info("Received gossip message",
-		"type", gossipMsg.Type,
-		"request_size", len(requestBody),
-	)
-
-	switch gossipMsg.Type {
-	case "GOSSIP_SYN":
-		var synPayload SynPayload
-		payloadBytes, err := json.Marshal(gossipMsg.Payload)
-		if err != nil {
-			logger.Error("Failed to marshal SYN payload", "error", err.Error())
-			return map[string]interface{}{"error": "Failed to marshal payload"}
-		}
-		if err := json.Unmarshal(payloadBytes, &synPayload); err != nil {
-			logger.Error("Invalid SYN payload", "error", err.Error(), "payload", string(payloadBytes))
-			return map[string]interface{}{"error": "Invalid SYN payload"}
-		}
-
-		// Handle SYN and return ACK response
-		ackPayload := g.handleSyn(synPayload)
-		logger.Info("Sending ACK response",
-			"updates_to_send", len(ackPayload.DigestsUpdate),
-			"requests_to_send", len(ackPayload.DigestsRequest),
-			"received_digests", len(synPayload.Digests),
-		)
-		return map[string]interface{}{
-			"digestsUpdate":  ackPayload.DigestsUpdate,
-			"digestsRequest": ackPayload.DigestsRequest,
-		}
-
-	case "GOSSIP_ACK2":
-		var ack2Payload Ack2Payload
-		payloadBytes, err := json.Marshal(gossipMsg.Payload)
-		if err != nil {
-			logger.Error("Failed to marshal ACK2 payload", "error", err.Error())
-			return map[string]interface{}{"error": "Failed to marshal payload"}
-		}
-		if err := json.Unmarshal(payloadBytes, &ack2Payload); err != nil {
-			logger.Error("Invalid ACK2 payload", "error", err.Error(), "payload", string(payloadBytes))
-			return map[string]interface{}{"error": "Invalid ACK2 payload"}
-		}
-
-		// Handle ACK2
-		g.handleAck2(ack2Payload)
-		logger.Info("Processed ACK2",
-			"updates_applied", len(ack2Payload.DigestsUpdate),
-			"gossip_cycle_complete", true,
-		)
-		return map[string]interface{}{"status": "OK"}
-
-	default:
-		logger.Warn("Unknown gossip message type", "type", gossipMsg.Type)
-		return map[string]interface{}{"error": "Unknown message type"}
-	}
-}
 func (g *Gossiper) StartGossiping() {
-	gossipTicker := time.NewTicker(30 * time.Second)
-	summaryTicker := time.NewTicker(600 * time.Second)
-
+	ticker := time.NewTicker(2 * time.Second)
 	go func() {
-		for {
-			select {
-			case <-gossipTicker.C:
-				g.gossipRound()
-			case <-summaryTicker.C:
-				g.logClusterHealth()
-			}
+		for range ticker.C {
+			g.gossipRound()
 		}
 	}()
 }
 
-func (g *Gossiper) gossipRound() {
-	g.mu.Lock()
-	g.heartbeat++ // ← increase here ONCE per round
-	currentHeartbeat := g.heartbeat
-	peersSnapshot := make(map[string]int)
-	for k, v := range g.peerHeartbeats {
-		peersSnapshot[k] = v
+func (g *Gossiper) HandleGossip(requestBody []byte) map[string]interface{} {
+	var msg GossipMessage
+	if err := json.Unmarshal(requestBody, &msg); err != nil {
+		return map[string]interface{}{"error": "invalid JSON"}
 	}
-	g.mu.Unlock()
-
-	// Enhanced gossip summary with metrics
-	totalPeers := len(g.peers)
-	activePeers := 0
-	stalePeers := 0
-
-	for _, heartbeat := range peersSnapshot {
-		if heartbeat > 0 {
-			activePeers++
-			if currentHeartbeat-heartbeat > 10 { // Consider stale if >10 heartbeats behind
-				stalePeers++
-			}
-		}
-	}
-
-	logger.Info("Gossip Round Summary",
-		"round", currentHeartbeat,
-		"node", g.currentNodeUrl,
-		"total_peers", totalPeers,
-		"active_peers", activePeers,
-		"stale_peers", stalePeers,
-		"peer_heartbeats", peersSnapshot,
-	)
-
-	if len(g.peers) == 0 {
-		logger.Error("No peers configured for gossiping - skipping round")
-		return
-	}
-
-	peer := g.peers[rand.Intn(len(g.peers))]
-	logger.Info("Initiating gossip exchange",
-		"target_peer", peer,
-		"my_heartbeat", currentHeartbeat,
-		"target_heartbeat", peersSnapshot[peer],
-	)
-
-	synPayload := SynPayload{
-		Digests: g.buildDigests(),
-	}
-
-	// Create gossip message and send via messenger
-	gossipMsg := GossipMessage{
-		Type:    "GOSSIP_SYN",
-		Payload: synPayload,
-	}
-
-	payloadBytes, err := json.Marshal(gossipMsg)
+	re, err := json.Marshal(msg.Payload)
 	if err != nil {
-		logger.Error("Failed to marshal gossip message", "error", err)
-		return
+		return map[string]interface{}{"error": "marshal payload"}
 	}
-	peerUrl := fmt.Sprintf("%s/gossip", peer)
-	message := messenger.NewMessage("GOSSIP_SYN", payloadBytes, g.currentNodeUrl, peerUrl)
-	if err := g.messenger.SendMessage(message); err != nil {
-		logger.Error("Failed to send gossip SYN",
-			"peer", peer,
-			"error", err.Error(),
-			"retry_in_next_round", true,
-		)
-	} else {
-		logger.Info("Gossip SYN sent successfully",
-			"peer", peer,
-			"digest_count", len(synPayload.Digests),
-		)
+	switch msg.Type {
+	case "GOSSIP_SYN":
+		var syn SynPayload
+		if err := json.Unmarshal(re, &syn); err != nil {
+			return map[string]interface{}{"error": "invalid SYN payload"}
+		}
+		ack := g.handleSyn(syn)
+		return map[string]interface{}{"updates": ack.Updates, "requests": ack.Requests}
+	case "GOSSIP_ACK2":
+		var ack2 Ack2Payload
+		if err := json.Unmarshal(re, &ack2); err != nil {
+			return map[string]interface{}{"error": "invalid ACK2 payload"}
+		}
+		g.handleAck2(ack2)
+		return map[string]interface{}{"status": "OK"}
+	default:
+		return map[string]interface{}{"error": "unknown type"}
 	}
 }
 
-func (g *Gossiper) buildDigests() []Digests {
-	digests := make([]Digests, 0, len(g.peers)+1)
-
-	// Add current node's digest
-	digests = append(digests, Digests{
-		NodeURL:   g.currentNodeUrl,
-		Heartbeat: g.heartbeat,
-	})
-
-	// Add peers' digests
-	for _, peer := range g.peers {
-		digests = append(digests, Digests{
-			NodeURL:   peer,
-			Heartbeat: g.peerHeartbeats[peer],
-		})
-	}
-
-	return digests
-}
-
-// logClusterHealth provides periodic cluster health metrics and insights
-func (g *Gossiper) logClusterHealth() {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	totalPeers := len(g.peers)
-	if totalPeers == 0 {
-		logger.Info("Cluster Health Summary",
-			"status", "STANDALONE",
-			"peers", 0,
-			"mode", "single_node",
-		)
-		return
-	}
-
-	activePeers := 0
-	stalePeers := 0
-	deadPeers := 0
-	avgLag := 0
-	maxLag := 0
-	minHeartbeat := g.heartbeat
-	maxHeartbeat := 0
-
-	for peer, heartbeat := range g.peerHeartbeats {
-		lag := g.heartbeat - heartbeat
-
-		if heartbeat == 0 {
-			deadPeers++
-		} else if lag > 10 {
-			stalePeers++
-		} else {
-			activePeers++
-		}
-
-		if heartbeat > 0 {
-			avgLag += lag
-			if lag > maxLag {
-				maxLag = lag
-			}
-			if heartbeat < minHeartbeat {
-				minHeartbeat = heartbeat
-			}
-			if heartbeat > maxHeartbeat {
-				maxHeartbeat = heartbeat
-			}
-		}
-
-		// Log individual peer status if concerning
-		if heartbeat == 0 {
-			logger.Warn("Peer appears dead",
-				"peer", peer,
-				"last_seen", "never",
-				"action", "monitoring",
-			)
-		} else if lag > 20 {
-			logger.Warn("Peer significantly lagging",
-				"peer", peer,
-				"heartbeat", heartbeat,
-				"lag", lag,
-				"health", "degraded",
-			)
-		}
-	}
-
-	clusterHealth := "HEALTHY"
-	if deadPeers > totalPeers/2 {
-		clusterHealth = "CRITICAL"
-	} else if stalePeers > 0 || deadPeers > 0 {
-		clusterHealth = "DEGRADED"
-	}
-
-	if activePeers > 0 {
-		avgLag = avgLag / activePeers
-	}
-
-	convergenceRate := float64(activePeers) / float64(totalPeers) * 100
-
-	logger.Info("Cluster Health Summary",
-		"status", clusterHealth,
-		"node_heartbeat", g.heartbeat,
-		"total_peers", totalPeers,
-		"active_peers", activePeers,
-		"stale_peers", stalePeers,
-		"dead_peers", deadPeers,
-		"convergence_rate", fmt.Sprintf("%.1f%%", convergenceRate),
-		"avg_lag", avgLag,
-		"max_lag", maxLag,
-		"heartbeat_range", fmt.Sprintf("%d-%d", minHeartbeat, maxHeartbeat),
-		"cluster_sync", func() string {
-			if maxLag <= 3 {
-				return "EXCELLENT"
-			} else if maxLag <= 10 {
-				return "GOOD"
-			} else {
-				return "POOR"
-			}
-		}(),
-	)
-
-	// Additional insights
-	if totalPeers > 0 {
-		if convergenceRate == 100 && maxLag <= 3 {
-			logger.Info("Cluster Performance", "insight", "optimal_convergence", "recommendation", "none")
-		} else if deadPeers > 0 {
-			logger.Warn("Cluster Performance", "insight", "peer_connectivity_issues", "recommendation", "check_network_and_peer_health")
-		} else if maxLag > 10 {
-			logger.Warn("Cluster Performance", "insight", "high_gossip_lag", "recommendation", "investigate_slow_peers")
-		}
-	}
-}
-
-// GetGossipMetrics returns current gossip protocol metrics for monitoring/API
 func (g *Gossiper) GetGossipMetrics() map[string]interface{} {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -345,56 +107,66 @@ func (g *Gossiper) GetGossipMetrics() map[string]interface{} {
 	totalPeers := len(g.peers)
 	if totalPeers == 0 {
 		return map[string]interface{}{
-			"status":         "standalone",
-			"node_heartbeat": g.heartbeat,
-			"total_peers":    0,
-			"node_url":       g.currentNodeUrl,
-			"cluster_health": "N/A",
+			"node_url":         g.currentNodeUrl,
+			"generation":       g.generation,
+			"node_heartbeat":   g.version,
+			"total_peers":      0,
+			"active_peers":     0,
+			"stale_peers":      0,
+			"dead_peers":       0,
+			"cluster_health":   "healthy",
+			"convergence_rate": 100.0,
+			"average_lag":      0.0,
+			"max_lag":          0,
+			"peer_details":     []interface{}{},
+			"timestamp":        time.Now().Unix(),
 		}
 	}
 
-	activePeers := 0
-	stalePeers := 0
-	deadPeers := 0
-	totalLag := 0
-	maxLag := 0
+	activePeers, stalePeers, deadPeers := 0, 0, 0
+	totalLag, maxLag := 0, 0
+	peerDetails := make([]map[string]interface{}, 0, totalPeers)
 
-	peerDetails := make([]map[string]interface{}, 0)
-
-	for peer, heartbeat := range g.peerHeartbeats {
-		lag := g.heartbeat - heartbeat
-		status := "active"
-
-		if heartbeat == 0 {
-			deadPeers++
-			status = "dead"
-		} else if lag > 10 {
-			stalePeers++
-			status = "stale"
-		} else {
-			activePeers++
-		}
-
-		if heartbeat > 0 {
+	for _, peer := range g.peers {
+		ps := g.peerStates[peer]
+		lag := 0
+		status := "dead"
+		if ps.generation > 0 {
+			lag = g.version - ps.version
+			if lag < 0 {
+				lag = 0
+			}
+			switch {
+			case lag <= 2:
+				status = "active"
+				activePeers++
+			case lag <= 5:
+				status = "stale"
+				stalePeers++
+			default:
+				status = "dead"
+				deadPeers++
+			}
 			totalLag += lag
 			if lag > maxLag {
 				maxLag = lag
 			}
+		} else {
+			deadPeers++
 		}
-
 		peerDetails = append(peerDetails, map[string]interface{}{
-			"url":       peer,
-			"heartbeat": heartbeat,
-			"lag":       lag,
-			"status":    status,
+			"url":        peer,
+			"generation": ps.generation,
+			"heartbeat":  ps.version,
+			"lag":        lag,
+			"status":     status,
 		})
 	}
 
 	avgLag := 0.0
-	if activePeers > 0 {
-		avgLag = float64(totalLag) / float64(activePeers)
+	if activePeers+stalePeers > 0 {
+		avgLag = float64(totalLag) / float64(activePeers+stalePeers)
 	}
-
 	clusterHealth := "healthy"
 	if deadPeers > totalPeers/2 {
 		clusterHealth = "critical"
@@ -402,17 +174,16 @@ func (g *Gossiper) GetGossipMetrics() map[string]interface{} {
 		clusterHealth = "degraded"
 	}
 
-	convergenceRate := float64(activePeers) / float64(totalPeers) * 100
-
 	return map[string]interface{}{
-		"node_heartbeat":   g.heartbeat,
 		"node_url":         g.currentNodeUrl,
-		"cluster_health":   clusterHealth,
+		"generation":       g.generation,
+		"node_heartbeat":   g.version,
 		"total_peers":      totalPeers,
 		"active_peers":     activePeers,
 		"stale_peers":      stalePeers,
 		"dead_peers":       deadPeers,
-		"convergence_rate": convergenceRate,
+		"cluster_health":   clusterHealth,
+		"convergence_rate": float64(activePeers) / float64(totalPeers) * 100,
 		"average_lag":      avgLag,
 		"max_lag":          maxLag,
 		"peer_details":     peerDetails,
@@ -420,125 +191,126 @@ func (g *Gossiper) GetGossipMetrics() map[string]interface{} {
 	}
 }
 
+func (g *Gossiper) gossipRound() {
+	g.mu.Lock()
+	g.version++
+	target := g.randomPeer()
+	syn := SynPayload{Digests: g.buildDigests()}
+	g.mu.Unlock()
+
+	if target == "" {
+		return
+	}
+
+	logger.Info("Gossip SYN", "to", target, "gen", g.generation, "ver", g.version)
+
+	msg := GossipMessage{Type: "GOSSIP_SYN", Payload: syn}
+	raw, _ := json.Marshal(msg)
+	m := messenger.NewMessage("GOSSIP_SYN", raw, g.currentNodeUrl, fmt.Sprintf("%s/gossip", target))
+	if err := g.messenger.SendMessage(m); err != nil {
+		logger.Warn("Gossip SYN failed", "peer", target, "error", err)
+	}
+}
+
+func (g *Gossiper) buildDigests() []EndpointDigest {
+	digests := make([]EndpointDigest, 0, len(g.peers)+1)
+	digests = append(digests, EndpointDigest{
+		NodeURL:    g.currentNodeUrl,
+		Generation: g.generation,
+		Version:    g.version,
+	})
+	for _, peer := range g.peers {
+		ps := g.peerStates[peer]
+		digests = append(digests, EndpointDigest{
+			NodeURL:    peer,
+			Generation: ps.generation,
+			Version:    ps.version,
+		})
+	}
+	return digests
+}
+
 func (g *Gossiper) handleSyn(payload SynPayload) AckPayload {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	DigestsUpdate := make([]Digests, 0)
-	DigestsRequest := make([]Digests, 0)
-	updatesApplied := 0
-	requestsGenerated := 0
+	updates := make([]EndpointDigest, 0)
+	requests := make([]EndpointDigest, 0)
 
-	for _, digest := range payload.Digests {
-		if digest.NodeURL == g.currentNodeUrl {
-			// Ignore self
+	for _, d := range payload.Digests {
+		if d.NodeURL == g.currentNodeUrl {
 			continue
 		}
-		// add it in the ring if it is a new peer
-		nodes := g.node.GetRing().GetNodes()
-		alreadyInRing := slices.Contains(nodes, digest.NodeURL)
-		if !alreadyInRing {
-			g.node.GetRing().AddNode(digest.NodeURL)
+		if _, known := g.peerStates[d.NodeURL]; !known {
+			g.peers = append(g.peers, d.NodeURL)
+			g.peerStates[d.NodeURL] = peerState{}
+			logger.Info("New peer discovered via gossip", "peer", d.NodeURL)
+		}
+		if !slices.Contains(g.node.GetRing().GetNodes(), d.NodeURL) {
+			g.node.GetRing().AddNode(d.NodeURL)
 		}
 
-		localHeartbeat, exists := g.peerHeartbeats[digest.NodeURL]
-
-		// Add new peer if not already known
-		if !exists {
-			g.peers = append(g.peers, digest.NodeURL)
-			logger.Info("New peer discovered",
-				"peer", digest.NodeURL,
-				"heartbeat", digest.Heartbeat,
-				"total_peers", len(g.peers),
-			)
-		}
-
-		// Detect node restart: if received heartbeat is much lower than stored,
-		// the peer likely restarted. Accept the lower heartbeat as new baseline.
-		restartDetected := exists && digest.Heartbeat < localHeartbeat && (localHeartbeat-digest.Heartbeat) > 100
-
-		if !exists || digest.Heartbeat > localHeartbeat || restartDetected {
-			// Update our record if:
-			// 1. This is a new peer, OR
-			// 2. The received heartbeat is newer, OR
-			// 3. Restart detected (heartbeat went backwards significantly)
-
-			oldHeartbeat := g.peerHeartbeats[digest.NodeURL]
-			g.peerHeartbeats[digest.NodeURL] = digest.Heartbeat
-			DigestsUpdate = append(DigestsUpdate, digest)
-			updatesApplied++
-
-			if restartDetected {
-				logger.Warn("Peer restart detected",
-					"peer", digest.NodeURL,
-					"old_heartbeat", oldHeartbeat,
-					"new_heartbeat", digest.Heartbeat,
-					"heartbeat_dropped", oldHeartbeat-digest.Heartbeat,
-					"action", "resetting_to_new_baseline",
-				)
-			} else {
-				logger.Info("Heartbeat updated",
-					"peer", digest.NodeURL,
-					"old_heartbeat", oldHeartbeat,
-					"new_heartbeat", digest.Heartbeat,
-					"lag_reduced", digest.Heartbeat-oldHeartbeat,
-				)
-			}
-		} else if digest.Heartbeat < localHeartbeat {
-			// Request update from peer if our heartbeat is newer
-			DigestsRequest = append(DigestsRequest, Digests{
-				NodeURL:   digest.NodeURL,
-				Heartbeat: localHeartbeat,
+		local := g.peerStates[d.NodeURL]
+		switch comparePeer(d, local) {
+		case newer:
+			g.peerStates[d.NodeURL] = peerState{generation: d.Generation, version: d.Version}
+			updates = append(updates, d)
+			logger.Info("Peer state updated", "peer", d.NodeURL, "gen", d.Generation, "ver", d.Version)
+		case older:
+			requests = append(requests, EndpointDigest{
+				NodeURL:    d.NodeURL,
+				Generation: local.generation,
+				Version:    local.version,
 			})
-			requestsGenerated++
-
-			logger.Info("Requesting update",
-				"peer", digest.NodeURL,
-				"peer_heartbeat", digest.Heartbeat,
-				"my_heartbeat", localHeartbeat,
-				"peer_lag", localHeartbeat-digest.Heartbeat,
-			)
 		}
 	}
-
-	logger.Info("SYN processing complete",
-		"digests_received", len(payload.Digests),
-		"updates_applied", updatesApplied,
-		"requests_generated", requestsGenerated,
-		"no_change", len(payload.Digests)-updatesApplied-requestsGenerated-1, // -1 for self
-	)
-
-	return AckPayload{
-		DigestsUpdate:  DigestsUpdate,
-		DigestsRequest: DigestsRequest,
-	}
+	return AckPayload{Updates: updates, Requests: requests}
 }
 
 func (g *Gossiper) handleAck2(payload Ack2Payload) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	updatesApplied := 0
-	for _, digest := range payload.DigestsUpdate {
-		if digest.NodeURL != g.currentNodeUrl {
-			oldHeartbeat := g.peerHeartbeats[digest.NodeURL]
-			g.peerHeartbeats[digest.NodeURL] = digest.Heartbeat
-			updatesApplied++
-
-			logger.Info("ACK2 update applied",
-				"peer", digest.NodeURL,
-				"old_heartbeat", oldHeartbeat,
-				"new_heartbeat", digest.Heartbeat,
-				"improvement", digest.Heartbeat-oldHeartbeat,
-			)
+	for _, d := range payload.Updates {
+		if d.NodeURL == g.currentNodeUrl {
+			continue
+		}
+		local := g.peerStates[d.NodeURL]
+		if comparePeer(d, local) == newer {
+			g.peerStates[d.NodeURL] = peerState{generation: d.Generation, version: d.Version}
+			logger.Info("ACK2 state applied", "peer", d.NodeURL, "gen", d.Generation, "ver", d.Version)
 		}
 	}
+}
 
-	if updatesApplied > 0 {
-		logger.Info("ACK2 processing complete",
-			"total_updates", len(payload.DigestsUpdate),
-			"updates_applied", updatesApplied,
-			"gossip_convergence", "improved",
-		)
+func (g *Gossiper) randomPeer() string {
+	if len(g.peers) == 0 {
+		return ""
+	}
+	return g.peers[rand.Intn(len(g.peers))]
+}
+
+type cmp int
+
+const (
+	older cmp = iota - 1
+	equal
+	newer
+)
+
+// comparePeer: higher generation always wins (handles node restarts).
+// Within the same generation, higher version wins.
+func comparePeer(d EndpointDigest, local peerState) cmp {
+	switch {
+	case d.Generation > local.generation:
+		return newer
+	case d.Generation < local.generation:
+		return older
+	case d.Version > local.version:
+		return newer
+	case d.Version < local.version:
+		return older
+	default:
+		return equal
 	}
 }
