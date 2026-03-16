@@ -63,7 +63,7 @@ func NewGossiper(currentNodeUrl string, peers []string, msngr *messenger.Messeng
 }
 
 func (g *Gossiper) StartGossiping() {
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(20 * time.Second)
 	go func() {
 		for range ticker.C {
 			g.gossipRound()
