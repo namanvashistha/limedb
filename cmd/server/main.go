@@ -10,6 +10,7 @@ import (
 	"limedb/internal/node"
 	"limedb/internal/server"
 	"limedb/internal/store"
+	"limedb/internal/store/lsm"
 	"limedb/internal/telemetry"
 	"log"
 	"os"
@@ -61,17 +62,17 @@ func main() {
 	}
 
 	// Initialize Store
-	storeFilePath := filepath.Join(cfg.DataDir, cfg.NodeUrl+".json")
-	logger.Info("💾 Initializing filesystem store", "path", storeFilePath)
+	lsmDir := filepath.Join(cfg.DataDir, cfg.NodeUrl+"_lsm")
+	logger.Info("💾 Initializing LSM store", "dir", lsmDir)
 
 	var backend store.Backend
-	fsStore, err := store.NewFileSystem(storeFilePath)
+	lsmStore, err := lsm.NewStore(lsm.Config{Dir: lsmDir})
 	if err != nil {
-		logger.Info("⚠️  Filesystem store failed, falling back to memory store", "error", err.Error())
+		logger.Info("⚠️  LSM store failed, falling back to memory store", "error", err.Error())
 		backend = store.NewMemory()
 	} else {
-		logger.Info("✅ Filesystem store ready", "path", storeFilePath, "keys", fsStore.Count())
-		backend = fsStore
+		logger.Info("✅ LSM store ready", "dir", lsmDir, "keys", lsmStore.Count())
+		backend = lsmStore
 	}
 
 	// Initialize Node Service
