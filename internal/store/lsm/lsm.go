@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -22,8 +23,15 @@ type Store struct {
 	sstables  []*SSTableReader // newest first
 	compactor *Compactor
 
-	flushThreshold int64 // MemTable flush size in bytes
-	closeOnce      sync.Once
+	flushThreshold  int64 // MemTable flush size in bytes
+	compactionCount int
+	closeOnce       sync.Once
+
+	bloomFalsePositives uint64
+	bloomTruePositives  uint64
+
+	isCompacting             int32
+	lastCompactionDurationMs uint64
 }
 
 // Config parameterises the LSM Store.
@@ -83,10 +91,16 @@ func NewStore(cfg Config) (*Store, error) {
 	cCfg := CompactorConfig{
 		Dir:       cfg.Dir,
 		Threshold: cfg.CompactionThreshold,
-		OnCompacted: func(inputs []string, output string) {
+		OnCompactionStart: func() {
+			atomic.StoreInt32(&s.isCompacting, 1)
+		},
+		OnCompacted: func(inputs []string, output string, durationMs int64) {
+			atomic.StoreInt32(&s.isCompacting, 0)
+			atomic.StoreUint64(&s.lastCompactionDurationMs, uint64(durationMs))
 			s.replaceSSTables(inputs, output)
 		},
 		OnError: func(err error) {
+			atomic.StoreInt32(&s.isCompacting, 0)
 			fmt.Fprintf(os.Stderr, "lsm: compaction error: %v\n", err)
 		},
 	}
@@ -117,18 +131,35 @@ func (s *Store) Get(key string) (string, bool) {
 
 	// 2. Check SSTables (newest to oldest).
 	for _, table := range s.sstables {
-		// Check Bloom filter first if it exists.
+		hasBloom := false
+		bloomMayContain := false
+
 		bf, err := ReadBloomFile(table.Path())
-		if err == nil && bf != nil && !bf.MayContain(key) {
-			continue // skip this SSTable entirely
+		if err == nil && bf != nil {
+			hasBloom = true
+			if !bf.MayContain(key) {
+				continue // skip this SSTable entirely
+			}
+			bloomMayContain = true
 		}
 
 		val, found := table.Get(key)
 		if found {
+			if hasBloom && bloomMayContain {
+				atomic.AddUint64(&s.bloomTruePositives, 1)
+			}
 			return val, true
 		}
 		if table.IsTombstone(key) {
+			if hasBloom && bloomMayContain {
+				atomic.AddUint64(&s.bloomTruePositives, 1)
+			}
 			return "", false // tombstone shadows older SSTables
+		}
+
+		// If bloomMayContain was true but we didn't find it or a tombstone, it's a false positive.
+		if hasBloom && bloomMayContain {
+			atomic.AddUint64(&s.bloomFalsePositives, 1)
 		}
 	}
 
@@ -236,12 +267,44 @@ func (s *Store) Stats() map[string]interface{} {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	var totalDiskUsage int64
+
+	// WAL file size
+	if walInfo, err := os.Stat(filepath.Join(s.dir, "wal.log")); err == nil {
+		totalDiskUsage += walInfo.Size()
+	}
+
+	// SSTables & Bloom filters sizes
+	for _, sst := range s.sstables {
+		if info, err := os.Stat(sst.Path()); err == nil {
+			totalDiskUsage += info.Size()
+		}
+		if info, err := os.Stat(bloomPath(sst.Path())); err == nil {
+			totalDiskUsage += info.Size()
+		}
+	}
+
+	fp := atomic.LoadUint64(&s.bloomFalsePositives)
+	tp := atomic.LoadUint64(&s.bloomTruePositives)
+	fpRate := 0.0
+	if fp+tp > 0 {
+		fpRate = float64(fp) / float64(fp+tp)
+	}
+
 	return map[string]interface{}{
-		"type":              "lsm",
-		"memtable_size_b":   s.mem.ApproximateSize(),
-		"memtable_keys":     s.mem.Len(),
-		"flush_threshold_b": s.flushThreshold,
-		"sstable_count":     len(s.sstables),
+		"type":                        "lsm",
+		"memtable_size_b":             s.mem.ApproximateSize(),
+		"memtable_keys":               s.mem.Len(),
+		"flush_threshold_b":           s.flushThreshold,
+		"sstable_count":               len(s.sstables),
+		"compaction_count":            s.compactionCount,
+		"is_compacting":               atomic.LoadInt32(&s.isCompacting) == 1,
+		"last_compaction_duration_ms": atomic.LoadUint64(&s.lastCompactionDurationMs),
+		"total_disk_usage_b":          totalDiskUsage,
+		"bloom_false_positive_rate":   fpRate,
+		"bloom_false_positives_total": fp,
+		"bloom_true_positives_total":  tp,
+		"approx_total_keys":           s.mem.Len() + int(totalDiskUsage/100), // very rough estimate
 	}
 }
 

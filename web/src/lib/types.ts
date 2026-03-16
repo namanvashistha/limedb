@@ -50,6 +50,12 @@ export interface StorageStats {
   memtable_keys?: number;
   flush_threshold_b?: number;
   sstable_count?: number;
+  compaction_count?: number;
+  total_disk_usage_b?: number;
+  bloom_false_positive_rate?: number;
+  bloom_false_positives_total?: number;
+  bloom_true_positives_total?: number;
+  approx_total_keys?: number;
   keys?: number; // for memory backend
 }
 
@@ -61,7 +67,13 @@ export interface HealthResponse {
   timestamp: string;
   uptime_seconds?: number;
   memory_allocated_mb?: number;
+  memory_sys_mb?: number;
+  gc_pause_ms?: number;
   goroutines_count?: number;
+  requests_per_second?: number;
+  average_latency_ms?: number;
+  error_rate?: number;
+  total_requests?: number;
   storage?: StorageStats;
 }
 

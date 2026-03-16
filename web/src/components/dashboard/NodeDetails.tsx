@@ -86,6 +86,10 @@ export function NodeDetails({ metrics, nodeUrl }: NodeDetailsProps) {
                   <MetricCard label="MemTable Keys" value={health.storage.memtable_keys || 0} />
                   <MetricCard label="SSTables" value={health.storage.sstable_count || 0} />
                   <MetricCard label="Flush Threshold" value={`${(health.storage.flush_threshold_b! / (1024 * 1024)).toFixed(2)} MB`} />
+                  <MetricCard label="Compactions" value={health.storage.compaction_count || 0} />
+                  <MetricCard label="Total Disk Usage" value={`${((health.storage.total_disk_usage_b || 0) / 1024).toFixed(2)} KB`} />
+                  <MetricCard label="Total Keys (Approx)" value={health.storage.approx_total_keys || 0} />
+                  <MetricCard label="Bloom FPR" value={health.storage.bloom_false_positive_rate ? `${(health.storage.bloom_false_positive_rate * 100).toFixed(4)}%` : "0.00%"} />
                 </>
               ) : (
                 <MetricCard label="Total Keys" value={health?.storage?.keys || 0} />

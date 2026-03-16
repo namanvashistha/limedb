@@ -234,11 +234,13 @@ type CompactorConfig struct {
 	// nothing has been explicitly signalled. Defaults to 10s if 0.
 	PollInterval time.Duration
 
+	// OnCompactionStart is called before MergeSSTables begins to allow the engine to set state.
+	OnCompactionStart func()
+
 	// OnCompacted is called after a successful compaction with the list of
-	// input paths that were merged and the single output path that replaced
-	// them. The callback must update the engine's SSTable registry under its
-	// own lock.
-	OnCompacted func(inputs []string, output string)
+	// input paths that were merged, the single output path that replaced
+	// them, and the duration of the compaction in milliseconds.
+	OnCompacted func(inputs []string, output string, durationMs int64)
 
 	// OnError is called when compaction fails. If nil, errors are silently
 	// dropped (not ideal for production; hook in your logger here).
@@ -355,6 +357,11 @@ func (c *Compactor) maybeCompact() {
 
 	outputPath := filepath.Join(c.cfg.Dir, fmt.Sprintf("compact-%06d.sst", seq))
 
+	if c.cfg.OnCompactionStart != nil {
+		c.cfg.OnCompactionStart()
+	}
+	start := time.Now()
+
 	// isFullCompaction=true means no older SSTables exist → safe to drop tombstones.
 	err := MergeSSTables(inputs, outputPath, MergeOptions{DropTombstones: true})
 	if err != nil {
@@ -371,7 +378,7 @@ func (c *Compactor) maybeCompact() {
 
 	// Notify engine (it will update its own registry and delete old files).
 	if c.cfg.OnCompacted != nil {
-		c.cfg.OnCompacted(inputs, outputPath)
+		c.cfg.OnCompacted(inputs, outputPath, time.Since(start).Milliseconds())
 	}
 
 	// Delete the input files now that the new SSTable is durable.

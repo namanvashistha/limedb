@@ -9,6 +9,7 @@ import (
 	"limedb/internal/messenger"
 	"limedb/internal/node"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/valyala/fasthttp"
@@ -29,6 +30,13 @@ type Server struct {
 	reqCounter metric.Int64Counter
 	reqLatency metric.Float64Histogram
 	startTime  time.Time
+
+	totalRequests  uint64
+	totalGets      uint64
+	totalSets      uint64
+	totalDels      uint64
+	totalErrors    uint64
+	totalLatencyMs uint64
 }
 
 // NewServer creates a new HTTP server.
@@ -117,6 +125,23 @@ func (s *Server) traceMiddleware(next fasthttp.RequestHandler) fasthttp.RequestH
 			attribute.Int("http.status_code", status),
 			attribute.String("node.url", s.service.GetNodeUrl()),
 		)
+
+		// Record manual metrics for the health endpoint
+		atomic.AddUint64(&s.totalRequests, 1)
+		atomic.AddUint64(&s.totalLatencyMs, uint64(duration))
+
+		route := string(ctx.Path())
+		if route == "/api/v1/get" {
+			atomic.AddUint64(&s.totalGets, 1)
+		} else if route == "/api/v1/set" {
+			atomic.AddUint64(&s.totalSets, 1)
+		} else if route == "/api/v1/del" {
+			atomic.AddUint64(&s.totalDels, 1)
+		}
+
+		if status >= 400 {
+			atomic.AddUint64(&s.totalErrors, 1)
+		}
 
 		s.reqCounter.Add(tracedCtx, 1, attrs)
 		s.reqLatency.Record(tracedCtx, duration, attrs)
@@ -251,6 +276,37 @@ func (s *Server) handleHealth(ctx *fasthttp.RequestCtx) {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 
+	// Calculate load metrics
+	reqs := atomic.LoadUint64(&s.totalRequests)
+	gets := atomic.LoadUint64(&s.totalGets)
+	sets := atomic.LoadUint64(&s.totalSets)
+	dels := atomic.LoadUint64(&s.totalDels)
+	errs := atomic.LoadUint64(&s.totalErrors)
+	lat := atomic.LoadUint64(&s.totalLatencyMs)
+
+	uptimeSecs := time.Since(s.startTime).Seconds()
+
+	rps := 0.0
+	gps := 0.0
+	sps := 0.0
+	dps := 0.0
+	if uptimeSecs > 0 {
+		rps = float64(reqs) / uptimeSecs
+		gps = float64(gets) / uptimeSecs
+		sps = float64(sets) / uptimeSecs
+		dps = float64(dels) / uptimeSecs
+	}
+
+	avgLat := 0.0
+	if reqs > 0 {
+		avgLat = float64(lat) / float64(reqs)
+	}
+
+	errRate := 0.0
+	if reqs > 0 {
+		errRate = float64(errs) / float64(reqs)
+	}
+
 	health := map[string]interface{}{
 		"status":              "healthy",
 		"service":             "limedb-node",
@@ -258,9 +314,18 @@ func (s *Server) handleHealth(ctx *fasthttp.RequestCtx) {
 		"nodeUrl":             s.service.GetNodeUrl(),
 		"timestamp":           time.Now().Format(time.RFC3339),
 		"storage":             s.service.GetStore().Stats(),
-		"uptime_seconds":      time.Since(s.startTime).Seconds(),
+		"uptime_seconds":      uptimeSecs,
 		"memory_allocated_mb": float64(memStats.Alloc) / 1024 / 1024,
+		"memory_sys_mb":       float64(memStats.Sys) / 1024 / 1024,
+		"gc_pause_ms":         float64(memStats.PauseTotalNs) / 1e6, // Total GC pause since start
 		"goroutines_count":    runtime.NumGoroutine(),
+		"requests_per_second": rps,
+		"gets_per_second":     gps,
+		"sets_per_second":     sps,
+		"dels_per_second":     dps,
+		"average_latency_ms":  avgLat,
+		"error_rate":          errRate,
+		"total_requests":      reqs,
 	}
 
 	body, _ := json.Marshal(health)

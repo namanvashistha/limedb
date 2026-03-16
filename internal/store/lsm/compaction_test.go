@@ -193,7 +193,7 @@ func TestCompactor_TriggersAboveThreshold(t *testing.T) {
 		Dir:          dir,
 		Threshold:    4,
 		PollInterval: time.Hour, // disable polling; triggered by Add
-		OnCompacted: func(inputs []string, output string) {
+		OnCompacted: func(inputs []string, output string, durationMs int64) {
 			inputsCh <- inputs
 			outputCh <- output
 		},
@@ -239,7 +239,7 @@ func TestCompactor_OldFilesDeleted(t *testing.T) {
 		Dir:          dir,
 		Threshold:    2,
 		PollInterval: time.Hour,
-		OnCompacted: func(_ []string, _ string) {
+		OnCompacted: func(_ []string, _ string, _ int64) {
 			select {
 			case doneCh <- struct{}{}:
 			default:
