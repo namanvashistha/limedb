@@ -10,6 +10,7 @@ export interface ClusterNodeData extends Record<string, unknown> {
   status: "active" | "stale" | "dead";
   peers: number;
   heartbeat: number;
+  generation: number;
   lag: number;
   isSeed?: boolean;
 }
@@ -85,19 +86,24 @@ export function ClusterNode(props: any) {
 
         {/* Metrics */}
         <div className="flex items-center gap-3 text-xs text-muted-foreground border-t pt-2">
-          <div className="flex items-center gap-1" title="Peers">
+          <div className="flex items-center gap-1" title="Peer count">
             <Users className="h-3 w-3" />
             <span>{data.peers}</span>
           </div>
-          <div className="flex items-center gap-1" title="Heartbeat">
+          <div className="flex items-center gap-1" title="Gossip round (version)">
             <Activity className="h-3 w-3" />
             <span>{data.heartbeat}</span>
           </div>
-          <div className="flex items-center gap-1" title="Lag">
+          <div className="flex items-center gap-1" title="Consensus lag (rounds behind)">
             <Clock className="h-3 w-3" />
-            <span>{data.lag}ms</span>
+            <span>{data.lag > 0 ? `Δ${data.lag}` : "✔"}</span>
           </div>
         </div>
+        {data.generation > 0 && (
+          <div className="text-[10px] text-muted-foreground/60 mt-1 font-mono">
+            gen {data.generation}
+          </div>
+        )}
       </div>
     </>
   );

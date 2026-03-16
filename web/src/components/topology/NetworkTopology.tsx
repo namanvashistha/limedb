@@ -92,6 +92,28 @@ export function NetworkTopology() {
         
         // Sort nodes alphabetically by URL for consistent positioning
         gossipResults.sort((a, b) => a.nodeUrl.localeCompare(b.nodeUrl));
+
+        // Build cross-referenced opinion map: what each node says about its peers
+        const peerOpinions = new Map<string, Array<{ status: string; lag: number }>>();
+        gossipData.forEach((data) => {
+          if (!data.success || !data.gossip) return;
+          data.gossip.peer_details.forEach((pd: any) => {
+            if (!peerOpinions.has(pd.url)) peerOpinions.set(pd.url, []);
+            peerOpinions.get(pd.url)!.push({ status: pd.status, lag: pd.lag });
+          });
+        });
+
+        const statusRank = (s: string) => s === "dead" ? 2 : s === "stale" ? 1 : 0;
+        const computeConsensus = (nodeUrl: string, isReachable: boolean): { status: "active" | "stale" | "dead"; lag: number } => {
+          if (!isReachable) return { status: "dead", lag: 0 };
+          const opinions = peerOpinions.get(nodeUrl) || [];
+          if (opinions.length === 0) return { status: "active", lag: 0 };
+          const worst = opinions.reduce((best, curr) =>
+            statusRank(curr.status) > statusRank(best.status) ? curr : best,
+            { status: "active", lag: 0 }
+          );
+          return worst as { status: "active" | "stale" | "dead"; lag: number };
+        };
         
         // Build nodes and edges
         const newNodes: Node<ClusterNodeData>[] = [];
@@ -119,12 +141,13 @@ export function NetworkTopology() {
             calculatedX = 150 + col * 300;
             calculatedY = 150 + row * 250;
           } else if (layoutType === "force") {
-            // Simple force-directed (spread out evenly)
+            // Honeycomb-like deterministic layout (no random — prevents shuffling on refresh)
             const cols = Math.ceil(Math.sqrt(totalNodes));
             const row = Math.floor(index / cols);
             const col = index % cols;
-            calculatedX = 200 + col * 250 + (Math.random() * 50 - 25);
-            calculatedY = 200 + row * 220 + (Math.random() * 50 - 25);
+            const rowOffset = row % 2 === 0 ? 0 : 150;
+            calculatedX = 150 + col * 300 + rowOffset;
+            calculatedY = 200 + row * 220;
           }
           
           // Use manual position if available, otherwise use calculated position
@@ -133,13 +156,15 @@ export function NetworkTopology() {
           const y = manualPos?.y ?? calculatedY;
           
           if (success && gossip) {
+            const consensus = computeConsensus(nodeUrl, true);
             // Create node
             const nodeData: ClusterNodeData = {
               url: nodeUrl,
-              status: "active",
+              status: consensus.status,
               peers: gossip.peer_details.length,
               heartbeat: gossip.node_heartbeat,
-              lag: 0,
+              generation: gossip.generation || 0,
+              lag: consensus.lag,
               isSeed: nodeUrl === seedGossip.node_url,
             };
             
@@ -179,6 +204,7 @@ export function NetworkTopology() {
                 status: "dead",
                 peers: 0,
                 heartbeat: 0,
+                generation: 0,
                 lag: 0,
                 isSeed: nodeUrl === seedGossip.node_url,
               },
