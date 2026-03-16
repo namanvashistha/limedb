@@ -42,9 +42,9 @@ export default function Dashboard() {
         return <ClusterOverview />;
       case "nodes":
         return (
-          <div className="flex gap-6 h-[calc(100vh-12rem)]">
+          <div className="flex gap-6 h-full min-h-[calc(100vh-8rem)]">
             {/* Left Pane - Nodes List */}
-            <div className="w-1/3 min-w-[300px] overflow-hidden">
+            <div className="w-72 flex-shrink-0 flex flex-col">
               <NodesList 
                 onSelectNode={handleSelectNode} 
                 selectedNodeUrl={selectedNode}
@@ -52,17 +52,17 @@ export default function Dashboard() {
               />
             </div>
             {/* Right Pane - Node Details */}
-            <div className="flex-1 overflow-auto">
+            <div className="flex-1 flex flex-col min-w-0">
               {selectedNode ? (
                 <NodeDetailView 
                   nodeUrl={selectedNode} 
                   showBackButton={false}
                 />
               ) : (
-                <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-card border rounded-xl shadow-sm">
                   <Server className="h-16 w-16 mb-4 opacity-20" />
                   <p className="text-lg font-medium">Select a node to view details</p>
-                  <p className="text-sm">Click on any node from the list to see its metrics and status</p>
+                  <p className="text-sm mt-1">Click on any node from the list to see its metrics and status</p>
                 </div>
               )}
             </div>

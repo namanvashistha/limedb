@@ -99,6 +99,8 @@ export function NodesList({ onSelectNode, selectedNodeUrl, compact = false }: No
         <ScrollArea className="flex-1">
           <div className="p-2">
             {filteredNodes.map((node) => {
+              const pos = node.url.lastIndexOf(":");
+              const displayName = pos !== -1 ? node.url.substring(pos) : node.url;
               const isSelected = selectedNodeUrl === node.url;
               const isActive = node.status === "active";
               
@@ -107,66 +109,24 @@ export function NodesList({ onSelectNode, selectedNodeUrl, compact = false }: No
                   key={node.url}
                   onClick={() => onSelectNode(node.url)}
                   className={`
-                    group relative p-3 mb-2 rounded-lg cursor-pointer transition-all
+                    group flex items-center justify-between p-2 mb-1 rounded-md cursor-pointer transition-colors text-sm
                     ${isSelected 
-                      ? "bg-primary/10 border-2 border-primary shadow-sm" 
-                      : "bg-card hover:bg-muted/50 border-2 border-transparent"
+                      ? "bg-primary text-primary-foreground font-medium" 
+                      : "hover:bg-muted font-normal text-muted-foreground"
                     }
                   `}
                 >
-                  {/* Status Indicator */}
-                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 rounded-r-full transition-all"
-                    style={{
-                      backgroundColor: isActive ? "#84cc16" : node.status === "stale" ? "#eab308" : "#ef4444"
-                    }}
-                  />
+                  <div className="flex items-center gap-2 overflow-hidden">
+                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${isActive ? (isSelected ? "bg-primary-foreground" : "bg-green-500") : "bg-destructive"}`} />
+                    <span className="truncate">{displayName}</span>
+                    {node.isSeed && (
+                      <span className={`text-[10px] px-1 rounded-sm border ${isSelected ? "border-primary-foreground/30 text-primary-foreground" : "border-border text-muted-foreground"}`}>seed</span>
+                    )}
+                  </div>
                   
-                  <div className="flex items-start gap-3 ml-2">
-                    {/* Node Icon */}
-                    <div className={`
-                      mt-0.5 p-1.5 rounded-md transition-all
-                      ${isActive ? "bg-green-500/10" : "bg-muted"}
-                    `}>
-                      <Server className={`h-3.5 w-3.5 ${isActive ? "text-green-600" : "text-muted-foreground"}`} />
-                    </div>
-                    
-                    {/* Node Info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-sm font-medium truncate">
-                          {node.url.split("//")[1] || node.url}
-                        </span>
-                        {node.isSeed && (
-                          <Badge variant="secondary" className="text-xs px-1.5 py-0">
-                            seed
-                          </Badge>
-                        )}
-                        <Badge 
-                          variant={isActive ? "outline" : "destructive"}
-                          className={`text-xs px-1.5 py-0 ${isActive ? "text-green-600 border-green-600" : ""}`}
-                        >
-                          {node.status}
-                        </Badge>
-                      </div>
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1">
-                          <Activity className="h-3 w-3" />
-                          {node.heartbeat}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Clock className="h-3 w-3" />
-                          {node.lag}ms
-                        </span>
-                      </div>
-                    </div>
-                    
-                    {/* Arrow indicator on hover/select */}
-                    <div className={`
-                      transition-all
-                      ${isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-50"}
-                    `}>
-                      <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                    </div>
+                  <div className={`text-xs ml-2 flex-shrink-0 opacity-80 flex items-center gap-1`}>
+                    {!isSelected && <Clock className="h-3 w-3" />}
+                    {node.lag}ms
                   </div>
                 </div>
               );

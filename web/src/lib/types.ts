@@ -13,6 +13,7 @@ export interface GossipMetrics {
   total_peers: number;
   active_peers: number;
   dead_peers: number;
+  is_seed?: boolean;
   stale_peers: number;
   convergence_rate: number;
   average_lag: number;
@@ -51,6 +52,8 @@ export interface StorageStats {
   flush_threshold_b?: number;
   sstable_count?: number;
   compaction_count?: number;
+  is_compacting?: boolean;
+  last_compaction_duration_ms?: number;
   total_disk_usage_b?: number;
   bloom_false_positive_rate?: number;
   bloom_false_positives_total?: number;
@@ -71,6 +74,9 @@ export interface HealthResponse {
   gc_pause_ms?: number;
   goroutines_count?: number;
   requests_per_second?: number;
+  gets_per_second?: number;
+  sets_per_second?: number;
+  dels_per_second?: number;
   average_latency_ms?: number;
   error_rate?: number;
   total_requests?: number;

@@ -2,22 +2,37 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RingDistributionChart } from "@/components/metrics/RingDistributionChart";
 import { api } from "@/lib/api";
-import { RingState, GossipMetrics } from "@/lib/types";
-import { Activity, Server, Database, AlertCircle } from "lucide-react";
+import { RingState, GossipMetrics, HealthResponse } from "@/lib/types";
+import { Activity, Server, Database, AlertCircle, HardDrive } from "lucide-react";
 
 export function ClusterOverview() {
   const [ring, setRing] = useState<RingState | null>(null);
   const [gossip, setGossip] = useState<GossipMetrics | null>(null);
+  const [clusterHealth, setClusterHealth] = useState<HealthResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let mounted = true;
     const fetchData = async () => {
       try {
         const [gossipData, ringData] = await Promise.all([
           api.getGossipMetrics(),
           api.getRingState(),
         ]);
+        
+        if (!mounted) return;
+
+        // Fetch health for all known peers + seed
+        if (gossipData) {
+          const allUrls = [gossipData.node_url, ...(gossipData.peer_details?.map(p => p.url) || [])];
+          const healthPromises = allUrls.map(url => api.getHealth(url).catch(() => null));
+          const healthResults = await Promise.all(healthPromises);
+          if (mounted) {
+            setClusterHealth(healthResults.filter(Boolean) as HealthResponse[]);
+          }
+        }
+
         setGossip(gossipData);
         setRing(ringData);
         setError(null);
@@ -25,13 +40,16 @@ export function ClusterOverview() {
         // console.warn("Failed to fetch cluster data", err);
         setError("Failed to connect to cluster");
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     };
 
     fetchData();
     const interval = setInterval(fetchData, 2000);
-    return () => clearInterval(interval);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
   }, []);
 
   if (loading && !ring) {
@@ -54,10 +72,14 @@ export function ClusterOverview() {
   const healthyNodes = gossip ? gossip.active_peers + 1 : 0; // +1 for seed node (always active)
   const deadNodes = gossip?.dead_peers || 0;
 
+  // Aggregate cluster telemtry
+  const totalRps = clusterHealth.reduce((sum, h) => sum + (h.requests_per_second || 0), 0);
+  const totalDiskKb = clusterHealth.reduce((sum, h) => sum + ((h.storage?.total_disk_usage_b || 0) / 1024), 0);
+
   return (
     <div className="space-y-6">
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Nodes</CardTitle>
@@ -91,6 +113,30 @@ export function ClusterOverview() {
             <div className="text-2xl font-bold">{ring?.ranges ? Object.values(ring.ranges).flat().length : 0}</div>
             <p className="text-xs text-muted-foreground">
               Active Ranges
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="border-primary/20 bg-primary/5">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Global Throughput</CardTitle>
+            <Activity className="h-4 w-4 text-primary" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-primary">{totalRps.toFixed(1)} req/s</div>
+            <p className="text-xs text-muted-foreground">
+              Across all nodes
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Data Size</CardTitle>
+            <HardDrive className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{totalDiskKb.toFixed(1)} KB</div>
+            <p className="text-xs text-muted-foreground">
+              SSTables on disk
             </p>
           </CardContent>
         </Card>
