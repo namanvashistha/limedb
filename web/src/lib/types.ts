@@ -59,6 +59,9 @@ export interface HealthResponse {
   version: string;
   nodeUrl: string;
   timestamp: string;
+  uptime_seconds?: number;
+  memory_allocated_mb?: number;
+  goroutines_count?: number;
   storage?: StorageStats;
 }
 

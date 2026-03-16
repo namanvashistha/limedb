@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ArrowLeft, Cpu, HardDrive, Activity } from "lucide-react";
 import { api } from "@/lib/api";
-import { GossipMetrics } from "@/lib/types";
+import { GossipMetrics, HealthResponse } from "@/lib/types";
 import { NodeDetails } from "./NodeDetails"; // Reusing the existing component for gossip details
 
 interface NodeDetailViewProps {
@@ -17,16 +17,19 @@ interface NodeDetailViewProps {
 
 export function NodeDetailView({ nodeUrl, onBack, showBackButton = true }: NodeDetailViewProps) {
   const [metrics, setMetrics] = useState<GossipMetrics | null>(null);
+  const [health, setHealth] = useState<HealthResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchMetrics = async () => {
       try {
-        // In a real scenario, we might want to fetch specific node metrics here
-        // For now, we'll use the global gossip metrics and filter/display relevant info
-        // Ideally, the backend would support /api/v1/node/:id/metrics
-        const data = await api.getGossipMetrics(nodeUrl);
-        setMetrics(data);
+        const [gossipData, healthData] = await Promise.all([
+          api.getGossipMetrics(nodeUrl),
+          api.getHealth(nodeUrl).catch(() => null) // fail gracefully if health is unavailable
+        ]);
+        
+        setMetrics(gossipData);
+        setHealth(healthData);
       } catch (err) {
         // console.warn("Failed to fetch node metrics", err);
       } finally {
@@ -43,6 +46,16 @@ export function NodeDetailView({ nodeUrl, onBack, showBackButton = true }: NodeD
     return <div>Loading node details...</div>;
   }
 
+  const formatUptime = (seconds?: number) => {
+    if (seconds === undefined) return "Unknown";
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
@@ -52,31 +65,31 @@ export function NodeDetailView({ nodeUrl, onBack, showBackButton = true }: NodeD
           </Button>
         )}
         <h2 className="text-2xl font-bold tracking-tight">{nodeUrl}</h2>
-        {metrics && (
-           <Badge variant={metrics.cluster_health === "healthy" ? "default" : "destructive"}>
-             {metrics.cluster_health.toUpperCase()}
+        {health && (
+           <Badge variant={health.status === "healthy" ? "default" : "destructive"}>
+             {health.status.toUpperCase()}
            </Badge>
         )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <MetricCard 
-          title="CPU Usage" 
-          value={`${(Math.random() * 5 + 1).toFixed(1)}%`} 
-          icon={Cpu} 
-          subtext="Mocked Data"
-        />
-        <MetricCard 
-          title="Memory Usage" 
-          value={`${(Math.random() * 200 + 100).toFixed(0)} MB`} 
-          icon={HardDrive} 
-          subtext="Mocked Data"
-        />
-        <MetricCard 
-          title="Request Latency" 
-          value={`${(Math.random() * 10).toFixed(2)} ms`} 
+          title="Uptime" 
+          value={formatUptime(health?.uptime_seconds)} 
           icon={Activity} 
-          subtext="Mocked Data"
+          subtext="Go runtime"
+        />
+        <MetricCard 
+          title="Memory Allocated" 
+          value={health?.memory_allocated_mb ? `${health.memory_allocated_mb.toFixed(2)} MB` : "Unknown"} 
+          icon={HardDrive} 
+          subtext="Go runtime heap"
+        />
+        <MetricCard 
+          title="Active Goroutines" 
+          value={health?.goroutines_count?.toString() || "Unknown"} 
+          icon={Cpu} 
+          subtext="Concurrency threads"
         />
       </div>
 

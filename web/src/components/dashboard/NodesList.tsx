@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { api } from "@/lib/api";
 import { GossipMetrics } from "@/lib/types";
-import { AlertCircle, ArrowRight, Server, Activity, Clock } from "lucide-react";
+import { AlertCircle, ArrowRight, Server, Activity, Clock, Search } from "lucide-react";
+import { Input } from "@/components/ui/input";
 
 interface NodesListProps {
   onSelectNode: (nodeUrl: string) => void;
@@ -18,6 +19,7 @@ export function NodesList({ onSelectNode, selectedNodeUrl, compact = false }: No
   const [metrics, setMetrics] = useState<GossipMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     const fetchMetrics = async () => {
@@ -68,6 +70,10 @@ export function NodesList({ onSelectNode, selectedNodeUrl, compact = false }: No
   const nodes = seedNode ? [seedNode, ...peerNodes] : peerNodes;
   const activeCount = nodes.filter(n => n.status === "active").length;
 
+  const filteredNodes = nodes
+    .filter(node => node.url.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a, b) => a.url.localeCompare(b.url));
+
   if (compact) {
     return (
       <Card className="h-full flex flex-col border rounded-lg shadow-sm">
@@ -80,10 +86,19 @@ export function NodesList({ onSelectNode, selectedNodeUrl, compact = false }: No
               </Badge>
             </div>
           </div>
+          <div className="relative mt-3">
+            <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              placeholder="Search nodes..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-8 h-8 text-xs"
+            />
+          </div>
         </CardHeader>
         <ScrollArea className="flex-1">
           <div className="p-2">
-            {nodes.map((node) => {
+            {filteredNodes.map((node) => {
               const isSelected = selectedNodeUrl === node.url;
               const isActive = node.status === "active";
               
@@ -156,10 +171,11 @@ export function NodesList({ onSelectNode, selectedNodeUrl, compact = false }: No
                 </div>
               );
             })}
-            {nodes.length === 0 && (
+            {filteredNodes.length === 0 && (
               <div className="flex flex-col items-center justify-center h-32 text-muted-foreground">
                 <Server className="h-8 w-8 mb-2 opacity-20" />
                 <p className="text-sm">No nodes found</p>
+                {searchQuery && <p className="text-xs mt-1">Try clearing your search</p>}
               </div>
             )}
           </div>
@@ -171,7 +187,18 @@ export function NodesList({ onSelectNode, selectedNodeUrl, compact = false }: No
   return (
     <Card className="h-full flex flex-col">
       <CardHeader>
-        <CardTitle>Cluster Nodes ({nodes.length})</CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle>Cluster Nodes ({nodes.length})</CardTitle>
+          <div className="relative w-64">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Filter nodes..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 h-9"
+            />
+          </div>
+        </div>
       </CardHeader>
       <CardContent className="flex-1 overflow-auto">
         <Table>
@@ -185,7 +212,7 @@ export function NodesList({ onSelectNode, selectedNodeUrl, compact = false }: No
             </TableRow>
           </TableHeader>
           <TableBody>
-            {nodes.map((node) => (
+            {filteredNodes.map((node) => (
               <TableRow 
                 key={node.url} 
                 className={`cursor-pointer hover:bg-muted/50 ${selectedNodeUrl === node.url ? "bg-muted border-l-4 border-l-primary" : ""}`}

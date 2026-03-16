@@ -8,6 +8,7 @@ import (
 	"limedb/internal/logger"
 	"limedb/internal/messenger"
 	"limedb/internal/node"
+	"runtime"
 	"time"
 
 	"github.com/valyala/fasthttp"
@@ -27,6 +28,7 @@ type Server struct {
 	meter      metric.Meter
 	reqCounter metric.Int64Counter
 	reqLatency metric.Float64Histogram
+	startTime  time.Time
 }
 
 // NewServer creates a new HTTP server.
@@ -56,6 +58,7 @@ func NewServer(service *node.NodeService, gossiper *gossiper.Gossiper, port int)
 		reqCounter: reqCounter,
 		reqLatency: reqLatency,
 		gossiper:   gossiper,
+		startTime:  time.Now(),
 	}
 }
 
@@ -245,13 +248,19 @@ func (s *Server) handleRingState(ctx *fasthttp.RequestCtx) {
 }
 
 func (s *Server) handleHealth(ctx *fasthttp.RequestCtx) {
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+
 	health := map[string]interface{}{
-		"status":    "healthy",
-		"service":   "limedb-node",
-		"version":   "1.0.0",
-		"nodeUrl":   s.service.GetNodeUrl(),
-		"timestamp": time.Now().Format(time.RFC3339),
-		"storage":   s.service.GetStore().Stats(),
+		"status":              "healthy",
+		"service":             "limedb-node",
+		"version":             "1.0.0",
+		"nodeUrl":             s.service.GetNodeUrl(),
+		"timestamp":           time.Now().Format(time.RFC3339),
+		"storage":             s.service.GetStore().Stats(),
+		"uptime_seconds":      time.Since(s.startTime).Seconds(),
+		"memory_allocated_mb": float64(memStats.Alloc) / 1024 / 1024,
+		"goroutines_count":    runtime.NumGoroutine(),
 	}
 
 	body, _ := json.Marshal(health)
