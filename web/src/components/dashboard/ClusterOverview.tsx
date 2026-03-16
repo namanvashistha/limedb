@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { RingDistributionChart } from "@/components/metrics/RingDistributionChart";
+import { KeyspaceMap } from "@/components/metrics/KeyspaceMap";
 import { api } from "@/lib/api";
 import { RingState, GossipMetrics, HealthResponse } from "@/lib/types";
 import { AlertCircle } from "lucide-react";
@@ -101,41 +101,53 @@ export function ClusterOverview() {
         />
       </div>
 
-      {/* ── Ring Visualization ─────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" style={{ height: 460 }}>
-        <Card className="lg:col-span-2 h-full flex flex-col border-0 shadow-none bg-muted/30">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base font-medium text-foreground/70">Token Ring Distribution</CardTitle>
-          </CardHeader>
-          <CardContent className="flex-1 min-h-0">
-            {ring && <RingDistributionChart data={ring} />}
-          </CardContent>
-        </Card>
-
-        {/* Node Health Column */}
-        <div className="flex flex-col gap-3 h-full overflow-y-auto">
-          <p className="text-sm font-medium text-foreground/60 mb-1">Node Health</p>
-          {(ring?.allNodes || []).map((nodeUrl, i) => {
+      {/* ── Node Grid / Heatmap ────────────────────────────────────── */}
+      <div>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Nodes Health</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+          {(ring?.allNodes ? [...ring.allNodes].sort() : []).map((nodeUrl) => {
             const h = clusterHealth.find(h => h.nodeUrl === nodeUrl);
             const isUp = !!h;
             return (
-              <div key={nodeUrl} className="flex items-center gap-3 py-2 border-b last:border-0">
-                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${isUp ? "bg-green-500" : "bg-muted-foreground/30"}`} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-mono truncate">{nodeUrl}</p>
-                  {isUp && <p className="text-xs text-muted-foreground">{(h.requests_per_second || 0).toFixed(1)} req/s · {(h.memory_allocated_mb || 0).toFixed(1)} MB</p>}
+              <div key={nodeUrl} className="p-4 border rounded-xl bg-card flex flex-col gap-2 relative transition-all hover:border-primary/30">
+                <div className="flex items-center gap-2">
+                  <div className={`w-2 h-2 rounded-full flex-shrink-0 animate-pulse ${isUp ? "bg-green-500 shadow-[0_0_6px_#22c55e]" : "bg-muted-foreground/30"}`} />
+                  <span className="font-mono text-xs font-semibold truncate flex-1">{nodeUrl.replace(/^https?:\/\//, "")}</span>
+                  <Badge variant={isUp ? "outline" : "secondary"} className={`text-[10px] py-0 px-1.5 ${isUp ? "text-green-600 border-green-600/50" : ""}`}>
+                    {isUp ? "up" : "down"}
+                  </Badge>
                 </div>
-                <Badge variant={isUp ? "outline" : "secondary"} className={`text-xs ${isUp ? "text-green-600 border-green-600/50" : "text-muted-foreground"}`}>
-                  {isUp ? "up" : "down"}
-                </Badge>
+
+                {isUp ? (
+                  <div className="flex flex-col gap-0.5">
+                    <div className="flex justify-between">
+                      <span className="text-[10px] text-muted-foreground">Requests</span>
+                      <span className="text-xs font-bold tabular-nums">{(h.requests_per_second || 0).toFixed(1)} req/s</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-[10px] text-muted-foreground">Latency</span>
+                      <span className="text-xs font-bold tabular-nums">{(h.average_latency_ms || 0).toFixed(1)} ms</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-[10px] text-muted-foreground">Memory</span>
+                      <span className="text-xs font-bold tabular-nums">{(h.memory_allocated_mb || 0).toFixed(1)} MB</span>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground h-10 flex items-center">Unreachable</p>
+                )}
               </div>
             );
           })}
-          {(!ring?.allNodes || ring.allNodes.length === 0) && (
-            <p className="text-sm text-muted-foreground py-4">No nodes discovered yet</p>
-          )}
         </div>
       </div>
+
+      {/* ── Keyspace Map Visualization ────────────────────────────── */}
+      <Card className="border shadow-none bg-muted/20">
+        <CardContent className="p-6">
+          {ring && <KeyspaceMap data={ring} />}
+        </CardContent>
+      </Card>
     </div>
   );
 }
