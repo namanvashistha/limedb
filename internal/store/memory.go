@@ -38,6 +38,14 @@ func (s *Memory) ListKeys() []string {
 	return keys
 }
 
+// Stats returns internal storage metrics.
+func (m *Memory) Stats() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "memory",
+		"keys": m.Count(),
+	}
+}
+
 func (s *Memory) Count() int {
 	count := 0
 	s.data.Range(func(key, value interface{}) bool {

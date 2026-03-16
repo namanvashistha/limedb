@@ -1,4 +1,4 @@
-import { GossipMetrics, KeyValueResponse, NodeStatus, RingState } from "./types";
+import { GossipMetrics, HealthResponse, KeyValueResponse, NodeStatus, RingState } from "./types";
 
 const BASE_URL = "/api/proxy";
 
@@ -88,6 +88,16 @@ class ClusterClient {
     const response = await fetch(`${BASE_URL}/cluster/gossip${query}`);
     if (!response.ok) {
       throw new Error("Failed to fetch gossip metrics");
+    }
+    return response.json();
+  }
+
+  async getHealth(nodeUrl?: string): Promise<HealthResponse> {
+    const target = nodeUrl || this.seedUrl;
+    const query = `?node=${encodeURIComponent(target)}`;
+    const response = await fetch(`${BASE_URL}/health${query}`);
+    if (!response.ok) {
+      throw new Error("Failed to fetch node health");
     }
     return response.json();
   }

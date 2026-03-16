@@ -231,6 +231,20 @@ func (s *Store) Count() int {
 	return len(s.ListKeys())
 }
 
+// Stats returns internal metrics about the LSM tree.
+func (s *Store) Stats() map[string]interface{} {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return map[string]interface{}{
+		"type":              "lsm",
+		"memtable_size_b":   s.mem.ApproximateSize(),
+		"memtable_keys":     s.mem.Len(),
+		"flush_threshold_b": s.flushThreshold,
+		"sstable_count":     len(s.sstables),
+	}
+}
+
 // Close gracefully shuts down the compactor, flushes the final MemTable,
 // and closes all open file handles.
 func (s *Store) Close() error {

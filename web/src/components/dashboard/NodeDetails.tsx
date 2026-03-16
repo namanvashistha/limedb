@@ -1,4 +1,6 @@
-import { GossipMetrics } from "@/lib/types";
+import { useEffect, useState } from "react";
+import { GossipMetrics, HealthResponse } from "@/lib/types";
+import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -11,6 +13,25 @@ interface NodeDetailsProps {
 }
 
 export function NodeDetails({ metrics, nodeUrl }: NodeDetailsProps) {
+  const [health, setHealth] = useState<HealthResponse | null>(null);
+
+  useEffect(() => {
+    if (!nodeUrl) return;
+    
+    const fetchHealth = async () => {
+      try {
+        const data = await api.getHealth(nodeUrl);
+        setHealth(data);
+      } catch (err) {
+        console.error("Failed to fetch node health:", err);
+      }
+    };
+    
+    fetchHealth();
+    const interval = setInterval(fetchHealth, 2000);
+    return () => clearInterval(interval);
+  }, [nodeUrl]);
+
   if (!metrics) {
     return (
       <Card className="h-full">
@@ -40,6 +61,7 @@ export function NodeDetails({ metrics, nodeUrl }: NodeDetailsProps) {
         <Tabs defaultValue="overview" className="h-full flex flex-col">
           <TabsList className="w-full justify-start">
             <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="storage">Storage</TabsTrigger>
             <TabsTrigger value="peers">Peers ({metrics.total_peers})</TabsTrigger>
             <TabsTrigger value="raw">Raw JSON</TabsTrigger>
           </TabsList>
@@ -52,6 +74,22 @@ export function NodeDetails({ metrics, nodeUrl }: NodeDetailsProps) {
               <MetricCard label="Avg Lag" value={(metrics.average_lag || 0).toFixed(2)} />
               <MetricCard label="Max Lag" value={metrics.max_lag} />
               <MetricCard label="Dead Peers" value={metrics.dead_peers} alert={metrics.dead_peers > 0} />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="storage" className="flex-1 overflow-auto mt-4">
+            <div className="grid grid-cols-2 gap-4">
+              <MetricCard label="Engine" value={health?.storage?.type || "Unknown"} />
+              {health?.storage?.type === 'lsm' ? (
+                <>
+                  <MetricCard label="MemTable Size" value={`${(health.storage.memtable_size_b! / 1024).toFixed(2)} KB`} />
+                  <MetricCard label="MemTable Keys" value={health.storage.memtable_keys || 0} />
+                  <MetricCard label="SSTables" value={health.storage.sstable_count || 0} />
+                  <MetricCard label="Flush Threshold" value={`${(health.storage.flush_threshold_b! / (1024 * 1024)).toFixed(2)} MB`} />
+                </>
+              ) : (
+                <MetricCard label="Total Keys" value={health?.storage?.keys || 0} />
+              )}
             </div>
           </TabsContent>
 

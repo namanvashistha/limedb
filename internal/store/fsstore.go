@@ -126,3 +126,10 @@ func (s *FileSystem) writeFile(data map[string]string) error {
 	}
 	return nil
 }
+
+// Stats returns internal storage metrics.
+func (s *FileSystem) Stats() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "fsstore",
+	}
+}

@@ -251,6 +251,7 @@ func (s *Server) handleHealth(ctx *fasthttp.RequestCtx) {
 		"version":   "1.0.0",
 		"nodeUrl":   s.service.GetNodeUrl(),
 		"timestamp": time.Now().Format(time.RFC3339),
+		"storage":   s.service.GetStore().Stats(),
 	}
 
 	body, _ := json.Marshal(health)

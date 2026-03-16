@@ -44,6 +44,24 @@ export interface RingState {
   virtualNodesPerNode?: number;
 }
 
+export interface StorageStats {
+  type: string;
+  memtable_size_b?: number;
+  memtable_keys?: number;
+  flush_threshold_b?: number;
+  sstable_count?: number;
+  keys?: number; // for memory backend
+}
+
+export interface HealthResponse {
+  status: string;
+  service: string;
+  version: string;
+  nodeUrl: string;
+  timestamp: string;
+  storage?: StorageStats;
+}
+
 export interface KeyValueResponse {
   status: number;
   body: string | object;

@@ -8,4 +8,5 @@ type Backend interface {
 	Delete(key string) bool
 	ListKeys() []string
 	Count() int
+	Stats() map[string]interface{}
 }
