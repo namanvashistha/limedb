@@ -11,12 +11,13 @@ import (
 
 // Config holds the application configuration.
 type Config struct {
-	ServerPort   int
-	NodeUrl      string
-	Peers        []string
-	VirtualNodes int
-	OtelEndpoint string
-	DataDir      string // directory for persistent store files
+	ServerPort        int
+	NodeUrl           string
+	Peers             []string
+	VirtualNodes      int
+	OtelEndpoint      string
+	DataDir           string // directory for persistent store files
+	ReplicationFactor int    // RF for data replication
 }
 
 // Load parses command line arguments and returns the configuration.
@@ -57,6 +58,7 @@ func Load() *Config {
 	virtualNodes := flag.Int("node.routing.virtual-nodes", defaultVirtualNodes, "Number of virtual nodes per physical node")
 	otelEndpoint := flag.String("otel.endpoint", defaultOtel, "OTLP Collector Endpoint (e.g., localhost:4317)")
 	dataDir := flag.String("data.dir", defaultDataDir, "Directory for persistent store JSON files")
+	replicationFactor := flag.Int("node.replication-factor", 3, "Replication factor (RF) for data durability")
 
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n", os.Args[0])
@@ -127,11 +129,12 @@ func Load() *Config {
 	}
 
 	return &Config{
-		ServerPort:   *serverPort,
-		NodeUrl:      *nodeUrl,
-		Peers:        validPeers,
-		VirtualNodes: *virtualNodes,
-		OtelEndpoint: *otelEndpoint,
-		DataDir:      *dataDir,
+		ServerPort:        *serverPort,
+		NodeUrl:           *nodeUrl,
+		Peers:             validPeers,
+		VirtualNodes:      *virtualNodes,
+		OtelEndpoint:      *otelEndpoint,
+		DataDir:           *dataDir,
+		ReplicationFactor: *replicationFactor,
 	}
 }

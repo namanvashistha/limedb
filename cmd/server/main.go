@@ -86,6 +86,7 @@ func main() {
 		cfg.VirtualNodes,
 		cfg.Peers,
 		backend,
+		cfg.ReplicationFactor,
 	)
 
 	// Initialize Gossiper (only if we have peers)

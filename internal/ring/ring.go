@@ -110,6 +110,42 @@ func (r *ConsistentHashRing) GetNode(key string) string {
 	return r.ring[r.sortedHashes[idx]]
 }
 
+// GetReplicas returns the RF nodes responsible for the given key (includes primary).
+// Ensures no duplicate nodes in the replica list by advancing to unique nodes.
+func (r *ConsistentHashRing) GetReplicas(key string, replicationFactor int) []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if len(r.ring) == 0 {
+		return []string{}
+	}
+
+	replicas := []string{}
+	seen := make(map[string]bool)
+
+	h := r.hash(key)
+
+	// Find RF unique nodes starting from hash
+	idx := sort.Search(len(r.sortedHashes), func(i int) bool {
+		return r.sortedHashes[i] >= h
+	})
+
+	// Advance through the ring collecting unique physical nodes
+	for i := 0; len(replicas) < replicationFactor && i < len(r.sortedHashes); i++ {
+		if idx >= len(r.sortedHashes) {
+			idx = 0 // Wrap around
+		}
+		nodeUrl := r.ring[r.sortedHashes[idx]]
+		if !seen[nodeUrl] {
+			replicas = append(replicas, nodeUrl)
+			seen[nodeUrl] = true
+		}
+		idx++
+	}
+
+	return replicas
+}
+
 // GetNodes returns all physical nodes in the ring.
 func (r *ConsistentHashRing) GetNodes() []string {
 	r.mu.RLock()

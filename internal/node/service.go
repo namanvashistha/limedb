@@ -3,6 +3,7 @@ package node
 import (
 	"encoding/json"
 	"fmt"
+	"limedb/internal/logger"
 	"limedb/internal/ring"
 	"limedb/internal/store"
 	"time"
@@ -22,16 +23,24 @@ type SetRequest struct {
 	Value string `json:"value"`
 }
 
+// WriteResponse tracks the result of a write to a single replica
+type WriteResponse struct {
+	NodeUrl string
+	Success bool
+	Error   string
+}
+
 // NodeService manages the node's operations and routing.
 type NodeService struct {
-	currentNodeUrl string
-	ring           *ring.ConsistentHashRing
-	store          store.Backend
-	client         *fasthttp.Client
+	currentNodeUrl    string
+	ring              *ring.ConsistentHashRing
+	store             store.Backend
+	client            *fasthttp.Client
+	replicationFactor int
 }
 
 // NewService creates a new NodeService with an injected store backend.
-func NewService(nodeUrl string, virtualNodes int, peers []string, s store.Backend) *NodeService {
+func NewService(nodeUrl string, virtualNodes int, peers []string, s store.Backend, replicationFactor int) *NodeService {
 	currentNodeUrl := nodeUrl
 
 	r := ring.New(virtualNodes)
@@ -45,10 +54,11 @@ func NewService(nodeUrl string, virtualNodes int, peers []string, s store.Backen
 	}
 
 	return &NodeService{
-		currentNodeUrl: currentNodeUrl,
-		ring:           r,
-		store:          s,
-		client:         &fasthttp.Client{MaxConnsPerHost: 1000},
+		currentNodeUrl:    currentNodeUrl,
+		ring:              r,
+		store:             s,
+		client:            &fasthttp.Client{MaxConnsPerHost: 1000},
+		replicationFactor: replicationFactor,
 	}
 }
 
@@ -77,36 +87,153 @@ func (s *NodeService) GetStore() store.Backend {
 	return s.store
 }
 
-// HandleGet handles a GET request, routing if necessary.
+// HandleGet handles a GET request with ONE consistency (read from any available replica).
 func (s *NodeService) HandleGet(key string) (*GetResponse, error) {
-	targetUrl := s.ring.GetNode(key)
-	if targetUrl == s.currentNodeUrl {
-		val, ok := s.store.Get(key)
-		if !ok {
-			return nil, fmt.Errorf("key not found")
+	replicas := s.ring.GetReplicas(key, s.replicationFactor)
+
+	// Try each replica in order
+	for _, replica := range replicas {
+		if replica == s.currentNodeUrl {
+			// Local read
+			val, ok := s.store.Get(key)
+			if ok {
+				logger.Info("Get ONE (local)", "key", key)
+				return &GetResponse{Value: val, NodeUrl: s.currentNodeUrl}, nil
+			}
+		} else {
+			// Remote read
+			result, err := s.forwardGet(replica, key)
+			if err == nil {
+				logger.Info("Get ONE (remote)", "key", key, "from", replica)
+				return result, nil
+			}
+			// Try next replica if this one fails
 		}
-		return &GetResponse{Value: val, NodeUrl: s.currentNodeUrl}, nil
 	}
-	return s.forwardGet(targetUrl, key)
+
+	return nil, fmt.Errorf("key not found on any replica")
 }
 
-// HandleSet handles a SET request, routing if necessary.
+// HandleSet handles a SET request with QUORUM consistency.
+// Writes to all replicas in parallel and returns success once QUORUM acks received.
 func (s *NodeService) HandleSet(key, value string) error {
-	targetUrl := s.ring.GetNode(key)
-	if targetUrl == s.currentNodeUrl {
-		s.store.Set(key, value)
+	replicas := s.ring.GetReplicas(key, s.replicationFactor)
+
+	// Calculate QUORUM: ceil(RF/2) + 1
+	quorum := (s.replicationFactor / 2) + 1
+
+	// Write to all replicas concurrently
+	responsesChan := make(chan WriteResponse, len(replicas))
+
+	for _, replica := range replicas {
+		go func(nodeUrl string) {
+			if nodeUrl == s.currentNodeUrl {
+				// Local write
+				s.store.Set(key, value)
+				responsesChan <- WriteResponse{NodeUrl: nodeUrl, Success: true}
+			} else {
+				// Remote write via HTTP
+				err := s.forwardSet(nodeUrl, key, value)
+				success := err == nil
+				errMsg := ""
+				if err != nil {
+					errMsg = err.Error()
+				}
+				responsesChan <- WriteResponse{
+					NodeUrl: nodeUrl,
+					Success: success,
+					Error:   errMsg,
+				}
+			}
+		}(replica)
+	}
+
+	// Collect responses until QUORUM reached or all responded
+	successCount := 0
+	var collectedErrors []string
+
+	for i := 0; i < len(replicas); i++ {
+		resp := <-responsesChan
+		if resp.Success {
+			successCount++
+		} else {
+			collectedErrors = append(collectedErrors, fmt.Sprintf("%s: %s", resp.NodeUrl, resp.Error))
+		}
+
+		// Early return once QUORUM reached (durability guarantee)
+		if successCount >= quorum {
+			logger.Info("Write QUORUM reached", "key", key, "rf", s.replicationFactor, "quorum", quorum, "acked", successCount)
+			// Note: Remaining replicas will continue writing asynchronously in background
+			return nil
+		}
+	}
+
+	// All replicas responded but QUORUM not reached
+	if successCount >= quorum {
 		return nil
 	}
-	return s.forwardSet(targetUrl, key, value)
+
+	errMsg := fmt.Sprintf("write failed: only %d/%d replicas acked (quorum=%d)", successCount, len(replicas), quorum)
+	if len(collectedErrors) > 0 {
+		errMsg += " - errors: " + fmt.Sprint(collectedErrors)
+	}
+	logger.Warn("Write QUORUM failed", "key", key, "acked", successCount, "required", quorum, "rf", s.replicationFactor)
+	return fmt.Errorf(errMsg)
 }
 
-// HandleDelete handles a DELETE request, routing if necessary.
+// HandleDelete handles a DELETE request with QUORUM consistency.
 func (s *NodeService) HandleDelete(key string) (bool, error) {
-	targetUrl := s.ring.GetNode(key)
-	if targetUrl == s.currentNodeUrl {
-		return s.store.Delete(key), nil
+	replicas := s.ring.GetReplicas(key, s.replicationFactor)
+
+	// Calculate QUORUM: ceil(RF/2) + 1
+	quorum := (s.replicationFactor / 2) + 1
+
+	// Delete from all replicas concurrently
+	responsesChan := make(chan WriteResponse, len(replicas))
+
+	for _, replica := range replicas {
+		go func(nodeUrl string) {
+			if nodeUrl == s.currentNodeUrl {
+				// Local delete
+				success := s.store.Delete(key)
+				responsesChan <- WriteResponse{NodeUrl: nodeUrl, Success: success}
+			} else {
+				// Remote delete via HTTP
+				success, err := s.forwardDelete(nodeUrl, key)
+				errMsg := ""
+				if err != nil {
+					errMsg = err.Error()
+				}
+				responsesChan <- WriteResponse{
+					NodeUrl: nodeUrl,
+					Success: success,
+					Error:   errMsg,
+				}
+			}
+		}(replica)
 	}
-	return s.forwardDelete(targetUrl, key)
+
+	// Collect responses until QUORUM reached
+	successCount := 0
+
+	for i := 0; i < len(replicas); i++ {
+		resp := <-responsesChan
+		if resp.Success {
+			successCount++
+		}
+
+		// Early return once QUORUM reached
+		if successCount >= quorum {
+			logger.Info("Delete QUORUM reached", "key", key, "quorum", quorum, "acked", successCount)
+			return true, nil
+		}
+	}
+
+	if successCount >= quorum {
+		return true, nil
+	}
+
+	return false, fmt.Errorf("delete failed: only %d/%d replicas acked (quorum=%d)", successCount, len(replicas), quorum)
 }
 
 // forwardGet forwards a GET request to a peer.
