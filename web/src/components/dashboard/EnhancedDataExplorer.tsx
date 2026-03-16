@@ -232,18 +232,26 @@ export function EnhancedDataExplorer() {
     setSeeding(true);
     setSeedProgress(0);
     const total = seedCount;
-    const batchSize = 10;
     let done = 0;
 
-    for (let i = 0; i < total; i += batchSize) {
-      const batch = Array.from({ length: Math.min(batchSize, total - i) }, () => ({
-        key: loremKey() + "-" + Math.floor(Math.random() * 9999),
-        value: loremValue(),
-      }));
-      await Promise.all(batch.map((item) => api.setKey(item.key, item.value)));
-      done += batch.length;
-      setSeedProgress(Math.round((done / total) * 100));
-    }
+    // Use all available nodes, or at least fallback to the seed URL
+    const nodes = discoveredNodes.length > 0 ? discoveredNodes : [api.getSeedUrl()];
+
+    // Generate all requests in parallel
+    const promises = Array.from({ length: total }, () => {
+      const targetNode = nodes[Math.floor(Math.random() * nodes.length)];
+      const key = loremKey() + "-" + Math.floor(Math.random() * 9999);
+      const value = loremValue();
+      
+      return api.setKey(key, value, targetNode).finally(() => {
+        // Update progress as each individual request finishes
+        done++;
+        setSeedProgress(Math.round((done / total) * 100));
+      });
+    });
+
+    // Wait for all of them to complete simultaneously
+    await Promise.allSettled(promises);
 
     setSeeding(false);
     setShowSeed(false);

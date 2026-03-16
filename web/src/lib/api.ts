@@ -157,8 +157,9 @@ class ClusterClient {
     return { status: res.status, body };
   }
 
-  async setKey(key: string, value: string): Promise<KeyValueResponse> {
-    const query = `?node=${encodeURIComponent(this.seedUrl)}`;
+  async setKey(key: string, value: string, nodeUrl?: string): Promise<KeyValueResponse> {
+    const target = nodeUrl || this.seedUrl;
+    const query = `?node=${encodeURIComponent(target)}`;
     const res = await fetch(`${BASE_URL}/set${query}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
