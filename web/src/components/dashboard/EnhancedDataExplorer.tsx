@@ -15,9 +15,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { api } from "@/lib/api";
-import { Database, Loader2, ChevronLeft, ChevronRight, Play, Trash2, Edit, RefreshCw, Layers, Zap, X } from "lucide-react";
+import { Database, Loader2, ChevronLeft, ChevronRight, Play, Trash2, Edit, RefreshCw, Layers, Zap, X, GitBranch } from "lucide-react";
 
 import { faker } from "@faker-js/faker";
+import { ReplicationInspector } from "@/components/cluster/ReplicationInspector";
 
 function loremKey() {
   return `${faker.word.adjective()}-${faker.animal.type()}-${faker.number.int({ min: 1, max: 9999 })}`;
@@ -336,6 +337,19 @@ export function EnhancedDataExplorer() {
               </pre>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Replication Inspector */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <GitBranch className="h-5 w-5" />
+            Replication Inspector
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ReplicationInspector />
         </CardContent>
       </Card>
 

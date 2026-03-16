@@ -30,6 +30,22 @@ type WriteResponse struct {
 	Error   string
 }
 
+// ReplicaInfo describes the replication state for a single key.
+type ReplicaInfo struct {
+	Key               string        `json:"key"`
+	ReplicationFactor int           `json:"replication_factor"`
+	Quorum            int           `json:"quorum"`
+	Replicas          []ReplicaNode `json:"replicas"`
+}
+
+// ReplicaNode describes one node's responsibility for a key.
+type ReplicaNode struct {
+	NodeUrl   string `json:"node_url"`
+	IsPrimary bool   `json:"is_primary"` // First node in the ring walk
+	IsLocal   bool   `json:"is_local"`   // This coordinator node
+	HasValue  bool   `json:"has_value"`  // Whether the node actually holds the key
+}
+
 // NodeService manages the node's operations and routing.
 type NodeService struct {
 	currentNodeUrl    string
@@ -85,6 +101,62 @@ func (s *NodeService) GetCurrentNodeUrl() string {
 // GetStore returns the underlying store backend.
 func (s *NodeService) GetStore() store.Backend {
 	return s.store
+}
+
+// GetReplicationFactor returns the configured replication factor.
+func (s *NodeService) GetReplicationFactor() int {
+	return s.replicationFactor
+}
+
+// GetReplicaInfo returns the replica assignment and live status for a key.
+// It probes each replica to check if the key actually exists there.
+func (s *NodeService) GetReplicaInfo(key string) *ReplicaInfo {
+	replicas := s.ring.GetReplicas(key, s.replicationFactor)
+	quorum := (s.replicationFactor / 2) + 1
+
+	type probeResult struct {
+		idx      int
+		hasValue bool
+	}
+	probeChan := make(chan probeResult, len(replicas))
+
+	for i, replica := range replicas {
+		go func(idx int, nodeUrl string) {
+			has := false
+			if nodeUrl == s.currentNodeUrl {
+				_, ok := s.store.Get(key)
+				has = ok
+			} else {
+				// HEAD-style: try to GET and check if it returns a value
+				result, err := s.forwardGet(nodeUrl, key)
+				has = err == nil && result != nil
+			}
+			probeChan <- probeResult{idx: idx, hasValue: has}
+		}(i, replica)
+	}
+
+	results := make([]bool, len(replicas))
+	for range replicas {
+		r := <-probeChan
+		results[r.idx] = r.hasValue
+	}
+
+	nodes := make([]ReplicaNode, len(replicas))
+	for i, nodeUrl := range replicas {
+		nodes[i] = ReplicaNode{
+			NodeUrl:   nodeUrl,
+			IsPrimary: i == 0,
+			IsLocal:   nodeUrl == s.currentNodeUrl,
+			HasValue:  results[i],
+		}
+	}
+
+	return &ReplicaInfo{
+		Key:               key,
+		ReplicationFactor: s.replicationFactor,
+		Quorum:            quorum,
+		Replicas:          nodes,
+	}
 }
 
 // HandleGet handles a GET request with ONE consistency (read from any available replica).
@@ -263,9 +335,9 @@ func (s *NodeService) forwardGet(targetUrl, key string) (*GetResponse, error) {
 	return &result, nil
 }
 
-// forwardSet forwards a SET request to a peer.
+// forwardSet forwards a SET request to a peer's internal replica endpoint (local write only, no re-replication).
 func (s *NodeService) forwardSet(targetUrl, key, value string) error {
-	url := fmt.Sprintf("%s/api/v1/set", targetUrl)
+	url := fmt.Sprintf("%s/internal/replicate", targetUrl)
 
 	req := fasthttp.AcquireRequest()
 	resp := fasthttp.AcquireResponse()
@@ -290,9 +362,9 @@ func (s *NodeService) forwardSet(targetUrl, key, value string) error {
 	return nil
 }
 
-// forwardDelete forwards a DELETE request to a peer.
+// forwardDelete forwards a DELETE request to a peer's internal replica endpoint (local delete only, no re-replication).
 func (s *NodeService) forwardDelete(targetUrl, key string) (bool, error) {
-	url := fmt.Sprintf("%s/api/v1/del/%s", targetUrl, key)
+	url := fmt.Sprintf("%s/internal/replicate/%s", targetUrl, key)
 
 	req := fasthttp.AcquireRequest()
 	resp := fasthttp.AcquireResponse()
@@ -310,6 +382,18 @@ func (s *NodeService) forwardDelete(targetUrl, key string) (bool, error) {
 		return false, fmt.Errorf("peer returned status %d", resp.StatusCode())
 	}
 
-	// Assuming peer returns "1" for true, "0" for false like Java implementation
 	return string(resp.Body()) == "1", nil
+}
+
+// HandleReplicaWrite writes a key directly to local storage without triggering replication.
+// This is called by the coordinator node when forwarding to replicas — prevents recursive replication.
+func (s *NodeService) HandleReplicaWrite(key, value string) {
+	s.store.Set(key, value)
+	logger.Info("Replica write (local)", "key", key)
+}
+
+// HandleReplicaDelete deletes a key directly from local storage without triggering replication.
+func (s *NodeService) HandleReplicaDelete(key string) bool {
+	logger.Info("Replica delete (local)", "key", key)
+	return s.store.Delete(key)
 }

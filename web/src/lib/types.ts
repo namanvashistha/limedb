@@ -32,6 +32,20 @@ export interface PeerDetail {
   status: "active" | "stale" | "dead" | "unknown";
 }
 
+export interface ReplicaNode {
+  node_url: string;
+  is_primary: boolean;
+  is_local: boolean;
+  has_value: boolean;
+}
+
+export interface ReplicaInfo {
+  key: string;
+  replication_factor: number;
+  quorum: number;
+  replicas: ReplicaNode[];
+}
+
 export interface RingRange {
   start: number;
   end: number;

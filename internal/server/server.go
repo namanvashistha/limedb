@@ -190,6 +190,13 @@ func (s *Server) router(ctx *fasthttp.RequestCtx) {
 		s.handleHealth(ctx)
 	case method == "POST" && path == "/gossip":
 		s.handleGossip(ctx)
+	case method == "GET" && len(path) > 17 && path[:17] == "/api/v1/replicas/":
+		s.handleReplicaInfo(ctx, path[17:])
+	// Internal node-to-node replication endpoints (local write only, no QUORUM re-replication)
+	case method == "POST" && path == "/internal/replicate":
+		s.handleInternalSet(ctx)
+	case method == "DELETE" && len(path) > 20 && path[:20] == "/internal/replicate/":
+		s.handleInternalDelete(ctx, path[20:])
 	default:
 		ctx.Error("Not Found", fasthttp.StatusNotFound)
 	}
@@ -244,6 +251,60 @@ func (s *Server) handleDelete(ctx *fasthttp.RequestCtx, key string) {
 	} else {
 		ctx.SetBodyString("0")
 	}
+}
+
+func (s *Server) handleReplicaInfo(ctx *fasthttp.RequestCtx, key string) {
+	info := s.service.GetReplicaInfo(key)
+	body, _ := json.Marshal(info)
+	ctx.SetContentType("application/json")
+	ctx.SetBody(body)
+}
+
+// handleInternalSet is called by replica coordinators to write locally without triggering QUORUM.
+func (s *Server) handleInternalSet(ctx *fasthttp.RequestCtx) {
+	if !isInternalRequest(ctx) {
+		ctx.Error("Forbidden", fasthttp.StatusForbidden)
+		return
+	}
+	var req node.SetRequest
+	if err := json.Unmarshal(ctx.PostBody(), &req); err != nil {
+		ctx.Error("Invalid JSON", fasthttp.StatusBadRequest)
+		return
+	}
+	s.service.HandleReplicaWrite(req.Key, req.Value)
+	ctx.SetBodyString("OK")
+}
+
+// handleInternalDelete is called by replica coordinators to delete locally without triggering QUORUM.
+func (s *Server) handleInternalDelete(ctx *fasthttp.RequestCtx, key string) {
+	if !isInternalRequest(ctx) {
+		ctx.Error("Forbidden", fasthttp.StatusForbidden)
+		return
+	}
+	deleted := s.service.HandleReplicaDelete(key)
+	if deleted {
+		ctx.SetBodyString("1")
+	} else {
+		ctx.SetBodyString("0")
+	}
+}
+
+// isInternalRequest returns true if the request originates from a private/loopback IP.
+// /internal/* endpoints are only for node-to-node replication — not for external clients.
+func isInternalRequest(ctx *fasthttp.RequestCtx) bool {
+	ip := ctx.RemoteIP()
+	if ip.IsLoopback() {
+		return true
+	}
+	// Allow RFC-1918 private ranges (LAN cluster peers)
+	private := []string{"10.", "172.", "192.168."}
+	ipStr := ip.String()
+	for _, prefix := range private {
+		if len(ipStr) >= len(prefix) && ipStr[:len(prefix)] == prefix {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handleClusterState(ctx *fasthttp.RequestCtx) {

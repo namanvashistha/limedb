@@ -1,4 +1,4 @@
-import { GossipMetrics, HealthResponse, KeyValueResponse, NodeStatus, RingState } from "./types";
+import { GossipMetrics, HealthResponse, KeyValueResponse, NodeStatus, ReplicaInfo, RingState } from "./types";
 
 const BASE_URL = "/api/proxy";
 
@@ -176,6 +176,14 @@ class ClusterClient {
     });
     const body = await res.text();
     return { status: res.status, body };
+  }
+
+  async getReplicaInfo(key: string, nodeUrl?: string): Promise<ReplicaInfo> {
+    const target = nodeUrl || this.seedUrl;
+    const query = `?node=${encodeURIComponent(target)}`;
+    const res = await fetch(`${BASE_URL}/replicas/${encodeURIComponent(key)}${query}`);
+    if (!res.ok) throw new Error("Failed to fetch replica info");
+    return res.json();
   }
 
   getDiscoveredHosts(): string[] {
