@@ -3,71 +3,25 @@
 import { useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { ClusterOverview } from "@/components/dashboard/ClusterOverview";
-import { NodesList } from "@/components/dashboard/NodesList";
-import { NodeDetailView } from "@/components/dashboard/NodeDetailView";
+import { NodesFleetView } from "@/components/dashboard/NodesFleetView";
 import { EnhancedDataExplorer } from "@/components/dashboard/EnhancedDataExplorer";
 import { NetworkTopology } from "@/components/topology/NetworkTopology";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { CommandPalette } from "@/components/command-palette";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, Server } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("overview");
-  const [selectedNode, setSelectedNode] = useState<string | null>(null);
 
-  // Handle navigation
-  const handleNavigate = (tab: string) => {
-    setActiveTab(tab);
-    setSelectedNode(null); // Reset selected node when changing tabs
-  };
-
-  const handleSelectNode = (nodeUrl: string) => {
-    setSelectedNode(nodeUrl);
-    // Ideally we would switch to a "nodes" tab or similar, but here we just render the detail view
-    // if we are in the nodes tab context.
-    // If we are in overview, we might want to switch to nodes tab first.
-    if (activeTab !== "nodes") {
-      setActiveTab("nodes");
-    }
-  };
-
-  const handleBackToNodes = () => {
-    setSelectedNode(null);
-  };
+  const handleNavigate = (tab: string) => setActiveTab(tab);
 
   const renderContent = () => {
     switch (activeTab) {
       case "overview":
         return <ClusterOverview />;
       case "nodes":
-        return (
-          <div className="flex gap-6 h-full min-h-[calc(100vh-8rem)]">
-            {/* Left Pane - Nodes List */}
-            <div className="w-72 flex-shrink-0 flex flex-col">
-              <NodesList 
-                onSelectNode={handleSelectNode} 
-                selectedNodeUrl={selectedNode}
-                compact={true}
-              />
-            </div>
-            {/* Right Pane - Node Details */}
-            <div className="flex-1 flex flex-col min-w-0">
-              {selectedNode ? (
-                <NodeDetailView 
-                  nodeUrl={selectedNode} 
-                  showBackButton={false}
-                />
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-card border rounded-xl shadow-sm">
-                  <Server className="h-16 w-16 mb-4 opacity-20" />
-                  <p className="text-lg font-medium">Select a node to view details</p>
-                  <p className="text-sm mt-1">Click on any node from the list to see its metrics and status</p>
-                </div>
-              )}
-            </div>
-          </div>
-        );
+        return <NodesFleetView />;
       case "metrics":
         return (
           <div className="h-[calc(100vh-12rem)]">

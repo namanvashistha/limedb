@@ -76,26 +76,22 @@ export function NodesList({ onSelectNode, selectedNodeUrl, compact = false }: No
 
   if (compact) {
     return (
-      <Card className="h-full flex flex-col border rounded-lg shadow-sm">
-        <CardHeader className="pb-3 border-b">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base font-semibold">Nodes</CardTitle>
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" className="text-xs">
-                {activeCount}/{nodes.length}
-              </Badge>
-            </div>
+      <div className="h-full flex flex-col">
+        <div className="pb-3 border-b mb-1">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Nodes</p>
+            <span className="text-xs text-muted-foreground tabular-nums">{activeCount}/{nodes.length} up</span>
           </div>
-          <div className="relative mt-3">
-            <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+          <div className="relative">
+            <Search className="absolute left-2 top-2.5 h-3 w-3 text-muted-foreground" />
             <Input
-              placeholder="Search nodes..."
+              placeholder="Search…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-8 h-8 text-xs"
+              className="pl-7 h-7 text-xs border-0 bg-muted/50 focus-visible:ring-0"
             />
           </div>
-        </CardHeader>
+        </div>
         <ScrollArea className="flex-1">
           <div className="p-2">
             {filteredNodes.map((node) => {
@@ -140,7 +136,7 @@ export function NodesList({ onSelectNode, selectedNodeUrl, compact = false }: No
             )}
           </div>
         </ScrollArea>
-      </Card>
+      </div>
     );
   }
 

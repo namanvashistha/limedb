@@ -14,9 +14,9 @@ import {
   Server,
   Network
 } from "lucide-react";
-import Image from "next/image";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ConnectionDialog } from "@/components/dashboard/ConnectionDialog";
+import { ClusterStatusBar } from "@/components/layout/ClusterStatusBar";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -96,18 +96,7 @@ export function DashboardLayout({
           ))}
         </div>
       </ScrollArea>
-      <div className="p-4 border-t">
-        <div className="flex items-center gap-3 px-2">
-          <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
-            <span className="text-xs font-medium">U</span>
-          </div>
-          <div className="flex-1 overflow-hidden">
-            <p className="text-sm font-medium truncate">User</p>
-            <p className="text-xs text-muted-foreground truncate">admin@limedb.io</p>
-          </div>
-          <ThemeToggle />
-        </div>
-      </div>
+      <ClusterStatusBar />
     </div>
   );
 
@@ -141,13 +130,14 @@ export function DashboardLayout({
             </div>
           </div>
           
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            <ThemeToggle />
             {headerAction}
           </div>
         </header>
 
-        <main className="flex-1 p-6 overflow-auto">
-          <div className="max-w-7xl mx-auto space-y-6">
+        <main className="flex-1 px-6 pt-6 overflow-hidden flex flex-col">
+          <div className="flex-1 flex flex-col">
             {children}
           </div>
         </main>
