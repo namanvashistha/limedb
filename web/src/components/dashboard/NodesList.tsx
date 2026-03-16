@@ -53,7 +53,7 @@ export function NodesList({ onSelectNode, selectedNodeUrl, compact = false }: No
     );
   }
 
-  // Combine the seed node (node_url) with peers (peer_details) to show all nodes
+  // Combine seed and peers, sort alphabetically by URL
   const seedNode = metrics ? {
     url: metrics.node_url,
     heartbeat: metrics.node_heartbeat,
@@ -67,12 +67,13 @@ export function NodesList({ onSelectNode, selectedNodeUrl, compact = false }: No
     isSeed: false
   }));
 
-  const nodes = seedNode ? [seedNode, ...peerNodes] : peerNodes;
-  const activeCount = nodes.filter(n => n.status === "active").length;
-
-  const filteredNodes = nodes
-    .filter(node => node.url.toLowerCase().includes(searchQuery.toLowerCase()))
+  // Always sort: combine all nodes and sort alphabetically
+  const allNodes = (seedNode ? [seedNode, ...peerNodes] : peerNodes)
+    .slice() // Create shallow copy to avoid mutation
     .sort((a, b) => a.url.localeCompare(b.url));
+  
+  const activeCount = allNodes.filter(n => n.status === "active").length;
+  const filteredNodes = allNodes.filter(node => node.url.toLowerCase().includes(searchQuery.toLowerCase()));
 
   if (compact) {
     return (
@@ -80,7 +81,7 @@ export function NodesList({ onSelectNode, selectedNodeUrl, compact = false }: No
         <div className="pb-3 border-b mb-1">
           <div className="flex items-center justify-between mb-3">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Nodes</p>
-            <span className="text-xs text-muted-foreground tabular-nums">{activeCount}/{nodes.length} up</span>
+            <span className="text-xs text-muted-foreground tabular-nums">{activeCount}/{allNodes.length} up</span>
           </div>
           <div className="relative">
             <Search className="absolute left-2 top-2.5 h-3 w-3 text-muted-foreground" />
@@ -144,7 +145,7 @@ export function NodesList({ onSelectNode, selectedNodeUrl, compact = false }: No
     <Card className="h-full flex flex-col">
       <CardHeader>
         <div className="flex items-center justify-between">
-          <CardTitle>Cluster Nodes ({nodes.length})</CardTitle>
+          <CardTitle>Cluster Nodes ({allNodes.length})</CardTitle>
           <div className="relative w-64">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
@@ -204,7 +205,7 @@ export function NodesList({ onSelectNode, selectedNodeUrl, compact = false }: No
                 </TableCell>
               </TableRow>
             ))}
-            {nodes.length === 0 && (
+            {filteredNodes.length === 0 && (
               <TableRow>
                 <TableCell colSpan={5} className="text-center h-24 text-muted-foreground">
                   No nodes found via gossip.

@@ -14,7 +14,7 @@ interface RingDistributionChartProps {
 const COLORS = ["#84cc16", "#3b82f6", "#a855f7", "#06b6d4", "#eab308", "#ef4444"];
 
 export function RingDistributionChart({ data }: { data: RingState }) {
-  const allNodes = data.allNodes || [];
+  const allNodes = (data.allNodes || []).sort();
   
   if (allNodes.length === 0) {
     return (

@@ -115,8 +115,8 @@ func (s *Server) traceMiddleware(next fasthttp.RequestHandler) fasthttp.RequestH
 
 		next(ctx)
 
-		// Record metrics
-		duration := float64(time.Since(startTime).Milliseconds())
+		// Record metrics (use microseconds for better precision)
+		duration := float64(time.Since(startTime).Microseconds()) / 1000.0
 		status := ctx.Response.StatusCode()
 
 		attrs := metric.WithAttributes(

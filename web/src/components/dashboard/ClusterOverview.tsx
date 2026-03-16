@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { KeyspaceMap } from "@/components/metrics/KeyspaceMap";
 import { api } from "@/lib/api";
 import { RingState, GossipMetrics, HealthResponse } from "@/lib/types";
+import { formatBytes, formatLatency } from "@/lib/utils";
 import { AlertCircle } from "lucide-react";
 
 export function ClusterOverview() {
@@ -64,7 +65,7 @@ export function ClusterOverview() {
   const healthyNodes = gossip ? gossip.active_peers + 1 : 0;
   const deadNodes = gossip?.dead_peers || 0;
   const totalRps = clusterHealth.reduce((sum, h) => sum + (h.requests_per_second || 0), 0);
-  const totalDiskKb = clusterHealth.reduce((sum, h) => sum + ((h.storage?.total_disk_usage_b || 0) / 1024), 0);
+  const totalDiskBytes = clusterHealth.reduce((sum, h) => sum + (h.storage?.total_disk_usage_b || 0), 0);
   const activeRanges = ring?.ranges ? Object.values(ring.ranges).flat().length : 0;
   const isHealthy = gossip?.cluster_health === "healthy";
 
@@ -91,7 +92,7 @@ export function ClusterOverview() {
         />
         <StatCell
           label="Total Disk"
-          value={`${totalDiskKb.toFixed(1)} KB`}
+          value={formatBytes(totalDiskBytes)}
           sub="SSTables on disk"
         />
         <StatCell
@@ -126,12 +127,18 @@ export function ClusterOverview() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-[10px] text-muted-foreground">Latency</span>
-                      <span className="text-xs font-bold tabular-nums">{(h.average_latency_ms || 0).toFixed(1)} ms</span>
+                      <span className="text-xs font-bold tabular-nums">{formatLatency(h.average_latency_ms || 0)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-[10px] text-muted-foreground">Memory</span>
-                      <span className="text-xs font-bold tabular-nums">{(h.memory_allocated_mb || 0).toFixed(1)} MB</span>
+                      <span className="text-xs font-bold tabular-nums">{formatBytes((h.memory_allocated_mb || 0) * 1024 * 1024)}</span>
                     </div>
+                    {h.cpu_percent !== undefined && (
+                      <div className="flex justify-between">
+                        <span className="text-[10px] text-muted-foreground">CPU</span>
+                        <span className="text-xs font-bold tabular-nums">{(h.cpu_percent || 0).toFixed(1)}%</span>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <p className="text-xs text-muted-foreground h-10 flex items-center">Unreachable</p>

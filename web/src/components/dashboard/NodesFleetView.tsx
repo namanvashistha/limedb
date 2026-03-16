@@ -52,7 +52,7 @@ export function NodesFleetView() {
             rps: h?.requests_per_second || 0,
             latency_ms: h?.average_latency_ms || 0,
           };
-        });
+        }).sort((a, b) => a.url.localeCompare(b.url));
 
         setNodes(prev => {
           // Auto-select first node on initial load only
@@ -96,7 +96,9 @@ export function NodesFleetView() {
     );
   }
 
-  const filtered = nodes.filter(n => n.url.toLowerCase().includes(search.toLowerCase()));
+  const filtered = nodes
+    .filter(n => n.url.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => a.url.localeCompare(b.url));
 
   return (
     <div className="flex gap-0 h-[calc(100vh-8rem)] -mx-6 border-t">

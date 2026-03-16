@@ -12,7 +12,10 @@ interface DiscoveredNodesProps {
 }
 
 export function DiscoveredNodes({ nodes, currentNode }: DiscoveredNodesProps) {
-  if (nodes.length === 0) {
+  // Sort nodes alphabetically for consistent display order
+  const sortedNodes = [...nodes].sort();
+
+  if (sortedNodes.length === 0) {
     return null;
   }
 
@@ -24,13 +27,13 @@ export function DiscoveredNodes({ nodes, currentNode }: DiscoveredNodesProps) {
             <Wifi className="h-5 w-5" />
             Discovered Nodes
           </span>
-          <Badge variant="outline">{nodes.length} nodes</Badge>
+          <Badge variant="outline">{sortedNodes.length} nodes</Badge>
         </CardTitle>
       </CardHeader>
       <CardContent>
         <ScrollArea className="h-[200px]">
           <div className="space-y-2">
-            {nodes.map((nodeUrl, idx) => {
+            {sortedNodes.map((nodeUrl, idx) => {
               const isCurrent = nodeUrl === currentNode;
               return (
                 <motion.div

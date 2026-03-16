@@ -93,9 +93,10 @@ export function EnhancedDataExplorer() {
   // Discover nodes on mount
   useEffect(() => {
     api.discoverCluster().then((nodes) => {
-      setDiscoveredNodes(nodes);
+      const sortedNodes = nodes.sort();
+      setDiscoveredNodes(sortedNodes);
       const map = new Map<string, number>();
-      nodes.forEach((n, i) => map.set(n, i));
+      sortedNodes.forEach((n, i) => map.set(n, i));
       setNodeColorMap(map);
     });
   }, []);

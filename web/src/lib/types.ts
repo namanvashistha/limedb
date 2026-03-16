@@ -78,6 +78,7 @@ export interface HealthResponse {
   sets_per_second?: number;
   dels_per_second?: number;
   average_latency_ms?: number;
+  cpu_percent?: number; // CPU usage percentage (0-100)
   error_rate?: number;
   total_requests?: number;
   storage?: StorageStats;
