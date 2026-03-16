@@ -66,7 +66,11 @@ func main() {
 	logger.Info("💾 Initializing LSM store", "dir", lsmDir)
 
 	var backend store.Backend
-	lsmStore, err := lsm.NewStore(lsm.Config{Dir: lsmDir})
+	lsmStore, err := lsm.NewStore(lsm.Config{
+		Dir:                 lsmDir,
+		MemTableFlushBytes:  500 * 1024, // 500 KB threshold
+		CompactionThreshold: 4,
+	})
 	if err != nil {
 		logger.Info("⚠️  LSM store failed, falling back to memory store", "error", err.Error())
 		backend = store.NewMemory()
