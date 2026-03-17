@@ -72,8 +72,27 @@ func main() {
 		CompactionThreshold: 4,
 	})
 	if err != nil {
-		logger.Info("⚠️  LSM store failed, falling back to memory store", "error", err.Error())
-		backend = store.NewMemory()
+		logger.Warn("⚠️  LSM store initialization failed", "error", err.Error())
+
+		// Attempt recovery: remove corrupted data and retry once
+		logger.Info("🔄 Attempting recovery: removing corrupted data and retrying...")
+		if err := os.RemoveAll(lsmDir); err != nil {
+			logger.Error("❌ Failed to remove corrupted data", "error", err.Error())
+		}
+
+		// Retry LSM store initialization
+		lsmStore, err = lsm.NewStore(lsm.Config{
+			Dir:                 lsmDir,
+			MemTableFlushBytes:  100 * 1024 * 1024,
+			CompactionThreshold: 4,
+		})
+		if err != nil {
+			logger.Warn("⚠️  LSM store recovery failed, falling back to memory store", "error", err.Error())
+			backend = store.NewMemory()
+		} else {
+			logger.Info("✅ LSM store recovered successfully", "dir", lsmDir)
+			backend = lsmStore
+		}
 	} else {
 		logger.Info("✅ LSM store ready", "dir", lsmDir, "keys", lsmStore.Count())
 		backend = lsmStore
