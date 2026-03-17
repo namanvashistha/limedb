@@ -8,7 +8,7 @@ import { GossipMetrics, HealthResponse } from "@/lib/types";
 import { NodeDetailView } from "@/components/dashboard/NodeDetailView";
 import { AlertCircle, Search, Server } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, formatBytes } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface NodeEntry {
@@ -18,6 +18,13 @@ interface NodeEntry {
   lag: number;
   rps: number;
   latency_ms: number;
+  storage?: {
+    type: string;
+    disk_usage_b?: number;
+    sstable_count?: number;
+    total_disk_usage_b?: number;
+    memtable_size_b?: number;
+  };
 }
 
 export function NodesFleetView() {
@@ -51,6 +58,13 @@ export function NodesFleetView() {
             lag: n.lag,
             rps: h?.requests_per_second || 0,
             latency_ms: h?.average_latency_ms || 0,
+            storage: h?.storage ? {
+              type: h.storage.type,
+              disk_usage_b: h.storage.total_disk_usage_b,
+              sstable_count: h.storage.sstable_count,
+              total_disk_usage_b: h.storage.total_disk_usage_b,
+              memtable_size_b: h.storage.memtable_size_b,
+            } : undefined,
           };
         }).sort((a, b) => a.url.localeCompare(b.url));
 
@@ -156,6 +170,19 @@ export function NodesFleetView() {
                     <span className="text-[10px] text-muted-foreground tabular-nums">{node.rps.toFixed(1)} req/s</span>
                     <span className="text-[10px] text-muted-foreground tabular-nums">{node.latency_ms.toFixed(1)} ms</span>
                   </div>
+                  {node.storage?.type === "lsm" && (
+                    <div className="flex items-center gap-2 pl-3.5 text-[9px] text-muted-foreground/70 mt-1 flex-wrap">
+                      <span className="inline-flex items-center gap-1">
+                        💾 {node.storage.sstable_count || 0} SSTables
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        {formatBytes(node.storage.total_disk_usage_b || 0, 1)}
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        📝 {formatBytes(node.storage.memtable_size_b || 0, 1)}
+                      </span>
+                    </div>
+                  )}
                 </button>
               );
             })}

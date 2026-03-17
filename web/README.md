@@ -17,6 +17,16 @@ A real-time monitoring dashboard for the LimeDB distributed key-value store, bui
 - **Keys View**: See all keys stored on the selected node
 - **Raw JSON**: Inspect the actual gossip payloads
 
+### 💾 Storage Metrics (LSM)
+When LSM storage is enabled:
+- **Node List View**: Each node displays disk usage and SSTable count
+- **Detailed View**: Click a node to see comprehensive LSM metrics including:
+  - MemTable size and key count
+  - SSTables count and compaction stats
+  - Bloom filter false positive rate
+  - Flush threshold and last compaction duration
+  - Approximate total keys stored
+
 ### ⚡ Real-Time Updates
 - **Auto-Refresh**: Updates every 2 seconds (configurable)
 - **Heartbeat Animation**: Visual pulse when node heartbeat changes
@@ -44,6 +54,22 @@ Create a `.env.local` file:
 LIMEDB_SEED_URL=http://localhost:7001
 ```
 
+## Viewing LSM Storage Metrics
+
+1. **In the Nodes List** (Left pane):
+   - Look for 💾 icon with SSTables count and disk usage
+   - Visible when LSM storage is active
+
+2. **In the Node Detail View** (Right pane):
+   - Click on any node to open the detailed inspector
+   - Scroll to "LSM Storage Engine" section
+   - Shows comprehensive storage statistics including:
+     - Disk usage (in KB)
+     - MemTable size and key count
+     - SSTable count
+     - Compaction history
+     - Bloom filter metrics
+
 ## Architecture
 
 ### API Proxy
@@ -63,10 +89,12 @@ The dashboard includes a Next.js API proxy (`/api/proxy/[...path]`) that:
 ### Cluster-Wide
 - `GET /api/v1/cluster/gossip` - Gossip metrics
 - `GET /api/v1/cluster/ring` - Hash ring state
+- `GET /api/v1/health` - Node health including LSM storage stats
 - `GET /api/v1/keys` - List all keys on a node
 
 ### Per-Node (via `?node=<url>` param)
 - `GET /api/v1/cluster/gossip?node=<url>` - Specific node's gossip view
+- `GET /api/v1/health?node=<url>` - Specific node's health and storage metrics
 - `GET /api/v1/keys?node=<url>` - Keys stored on specific node
 
 ## Learn More
