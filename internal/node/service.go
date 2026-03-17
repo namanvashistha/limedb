@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"limedb/internal/logger"
-	"limedb/internal/membership"
+	"limedb/internal/placement"
 	"limedb/internal/store"
 	"time"
 
@@ -49,26 +49,26 @@ type ReplicaNode struct {
 // NodeService manages the node's operations and routing.
 type NodeService struct {
 	currentNodeUrl    string
-	membership        *membership.Manager
+	placement         *placement.Manager
 	store             store.Backend
 	client            *fasthttp.Client
 	replicationFactor int
 }
 
 // NewService creates a new NodeService with an injected store backend.
-func NewService(nodeUrl string, manager *membership.Manager, s store.Backend, replicationFactor int) *NodeService {
+func NewService(nodeUrl string, placementManager *placement.Manager, s store.Backend, replicationFactor int) *NodeService {
 	return &NodeService{
 		currentNodeUrl:    nodeUrl,
-		membership:        manager,
+		placement:         placementManager,
 		store:             s,
 		client:            &fasthttp.Client{MaxConnsPerHost: 1000},
 		replicationFactor: replicationFactor,
 	}
 }
 
-// GetMembership returns the membership manager used for routing and activation.
-func (s *NodeService) GetMembership() *membership.Manager {
-	return s.membership
+// GetPlacement returns the placement manager used for routing.
+func (s *NodeService) GetPlacement() *placement.Manager {
+	return s.placement
 }
 
 // GetNodeUrl returns the current node URL.
@@ -78,7 +78,15 @@ func (s *NodeService) GetNodeUrl() string {
 
 // GetPeers returns the list of peers in the ring.
 func (s *NodeService) GetPeers() []string {
-	return s.membership.GetPeers()
+	snapshot := s.placement.Snapshot()
+	if snapshot == nil {
+		return nil
+	}
+	peers := make([]string, 0, len(snapshot.Members))
+	for _, member := range snapshot.Members {
+		peers = append(peers, member.NodeURL)
+	}
+	return peers
 }
 
 // GetCurrentNodeUrl returns the current node's URL.
@@ -99,7 +107,11 @@ func (s *NodeService) GetReplicationFactor() int {
 // GetReplicaInfo returns the replica assignment and live status for a key.
 // It probes each replica to check if the key actually exists there.
 func (s *NodeService) GetReplicaInfo(key string) *ReplicaInfo {
-	replicas := s.membership.GetRing().GetReplicas(key, s.replicationFactor)
+	replicaSet := s.placement.ResolveReplicas(key)
+	replicas := make([]string, 0, len(replicaSet.Replicas))
+	for _, replica := range replicaSet.Replicas {
+		replicas = append(replicas, replica.NodeURL)
+	}
 	quorum := (s.replicationFactor / 2) + 1
 
 	type probeResult struct {
@@ -149,10 +161,11 @@ func (s *NodeService) GetReplicaInfo(key string) *ReplicaInfo {
 
 // HandleGet handles a GET request with ONE consistency (read from any available replica).
 func (s *NodeService) HandleGet(key string) (*GetResponse, error) {
-	replicas := s.membership.GetRing().GetReplicas(key, s.replicationFactor)
+	replicaSet := s.placement.ResolveReplicas(key)
 
 	// Try each replica in order
-	for _, replica := range replicas {
+	for _, replicaTarget := range replicaSet.Replicas {
+		replica := replicaTarget.NodeURL
 		if replica == s.currentNodeUrl {
 			// Local read
 			val, ok := s.store.Get(key)
@@ -177,7 +190,11 @@ func (s *NodeService) HandleGet(key string) (*GetResponse, error) {
 // HandleSet handles a SET request with QUORUM consistency.
 // Writes to all replicas in parallel and returns success once QUORUM acks received.
 func (s *NodeService) HandleSet(key, value string) error {
-	replicas := s.membership.GetRing().GetReplicas(key, s.replicationFactor)
+	replicaSet := s.placement.ResolveReplicas(key)
+	replicas := make([]string, 0, len(replicaSet.Replicas))
+	for _, replica := range replicaSet.Replicas {
+		replicas = append(replicas, replica.NodeURL)
+	}
 
 	// Calculate QUORUM: ceil(RF/2) + 1
 	quorum := (s.replicationFactor / 2) + 1
@@ -243,7 +260,11 @@ func (s *NodeService) HandleSet(key, value string) error {
 
 // HandleDelete handles a DELETE request with QUORUM consistency.
 func (s *NodeService) HandleDelete(key string) (bool, error) {
-	replicas := s.membership.GetRing().GetReplicas(key, s.replicationFactor)
+	replicaSet := s.placement.ResolveReplicas(key)
+	replicas := make([]string, 0, len(replicaSet.Replicas))
+	for _, replica := range replicaSet.Replicas {
+		replicas = append(replicas, replica.NodeURL)
+	}
 
 	// Calculate QUORUM: ceil(RF/2) + 1
 	quorum := (s.replicationFactor / 2) + 1

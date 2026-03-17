@@ -248,6 +248,7 @@ func (g *Gossiper) handleSyn(payload SynPayload) AckPayload {
 		if g.membership.ObserveNode(d.NodeURL) {
 			logger.Info("Peer recorded as discovered", "peer", d.NodeURL)
 		}
+		g.membership.RecordObservation(d.NodeURL, d.Generation, d.Version)
 
 		local := g.peerStates[d.NodeURL]
 		switch comparePeer(d, local) {

@@ -1,4 +1,4 @@
-import { GossipMetrics, HealthResponse, KeyValueResponse, MembershipState, NodeStatus, ReplicaInfo, RingState } from "./types";
+import { GossipMetrics, HealthResponse, KeyValueResponse, MembershipState, NodeStatus, PlacementState, ReplicaInfo, RingState } from "./types";
 
 const BASE_URL = "/api/proxy";
 
@@ -105,6 +105,16 @@ class ClusterClient {
     const response = await fetch(`${BASE_URL}/admin/membership${query}`);
     if (!response.ok) {
       throw new Error("Failed to fetch membership state");
+    }
+    return response.json();
+  }
+
+  async getPlacementState(nodeUrl?: string): Promise<PlacementState> {
+    const target = nodeUrl || this.seedUrl;
+    const query = `?node=${encodeURIComponent(target)}`;
+    const response = await fetch(`${BASE_URL}/admin/placement${query}`);
+    if (!response.ok) {
+      throw new Error("Failed to fetch placement state");
     }
     return response.json();
   }

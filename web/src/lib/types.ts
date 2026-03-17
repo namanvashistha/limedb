@@ -108,12 +108,41 @@ export interface KeyValueResponse {
 
 export interface MembershipNode {
   node_url: string;
-  state: "ACTIVE" | "DISCOVERED";
+  state: "DISCOVERED" | "BOOTSTRAPPING" | "ACTIVE" | "LEAVING" | "LEFT";
   is_local: boolean;
+  is_active_for_routing?: boolean;
+  generation?: number;
+  version?: number;
+  last_seen_unix?: number;
+  liveness?: "unknown" | "alive" | "stale" | "dead";
+  activation_epoch?: number;
+  transition_requested?: boolean;
 }
 
 export interface MembershipState {
   current_node_url: string;
+  membership_epoch?: number;
   observed_nodes: MembershipNode[];
   active_nodes: MembershipNode[];
+  desired_nodes?: MembershipNode[];
+}
+
+export interface PlacementMember {
+  node_url: string;
+  role: string;
+}
+
+export interface TokenAssignment {
+  token: number;
+  node_url: string;
+}
+
+export interface PlacementState {
+  epoch: number;
+  status: "PENDING" | "ACTIVE";
+  virtual_nodes: number;
+  replication_factor: number;
+  members: PlacementMember[];
+  tokens: TokenAssignment[];
+  created_at_unix: number;
 }

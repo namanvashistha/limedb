@@ -9,6 +9,7 @@ import (
 	"limedb/internal/membership"
 	"limedb/internal/messenger"
 	"limedb/internal/node"
+	"limedb/internal/placement"
 	"limedb/internal/server"
 	"limedb/internal/store/lsm"
 	"limedb/internal/telemetry"
@@ -81,9 +82,10 @@ func main() {
 	// Initialize Node Service
 	logger.Info("🔧 Initializing node service")
 	memberManager := membership.NewManager(cfg.NodeUrl, cfg.VirtualNodes, cfg.Peers)
+	placementManager := placement.NewManager(memberManager, cfg.VirtualNodes, cfg.ReplicationFactor)
 	svc := node.NewService(
 		cfg.NodeUrl,
-		memberManager,
+		placementManager,
 		backend,
 		cfg.ReplicationFactor,
 	)
@@ -98,7 +100,7 @@ func main() {
 
 	// Initialize HTTP Server
 	logger.Info("🌐 Initializing HTTP server")
-	srv := server.NewServer(svc, memberManager, g, cfg.ServerPort)
+	srv := server.NewServer(svc, memberManager, placementManager, g, cfg.ServerPort)
 
 	// Start Server in a goroutine
 	serverStarted := make(chan bool, 1)
