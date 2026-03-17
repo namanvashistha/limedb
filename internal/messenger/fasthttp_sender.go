@@ -37,9 +37,7 @@ func (s *FastHTTPMessageSender) SendMessage(msg *Message) error {
 	}
 	if resp.StatusCode() != fasthttp.StatusOK {
 		logger.Error("unexpected status code: %d", resp.StatusCode())
-		return fmt.Errorf("unexpected status code",
-			"statusCode", resp.StatusCode(), "peer", msg.DestinationNodeURL,
-		)
+		return fmt.Errorf("unexpected status code: statusCode=%d peer=%s", resp.StatusCode(), msg.DestinationNodeURL)
 	}
 	return nil
 }

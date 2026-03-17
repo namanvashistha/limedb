@@ -6,6 +6,7 @@ import (
 	"limedb/internal/config"
 	"limedb/internal/gossiper"
 	"limedb/internal/logger"
+	"limedb/internal/membership"
 	"limedb/internal/messenger"
 	"limedb/internal/node"
 	"limedb/internal/server"
@@ -79,10 +80,10 @@ func main() {
 
 	// Initialize Node Service
 	logger.Info("🔧 Initializing node service")
+	memberManager := membership.NewManager(cfg.NodeUrl, cfg.VirtualNodes, cfg.Peers)
 	svc := node.NewService(
 		cfg.NodeUrl,
-		cfg.VirtualNodes,
-		cfg.Peers,
+		memberManager,
 		backend,
 		cfg.ReplicationFactor,
 	)
@@ -92,12 +93,12 @@ func main() {
 	httpClient := &fasthttp.Client{}
 	sender := messenger.NewFasthttpMessengeSender(httpClient)
 	msngr := messenger.NewMessenger(sender)
-	g := gossiper.NewGossiper(cfg.NodeUrl, cfg.Peers, msngr, svc)
+	g := gossiper.NewGossiper(cfg.NodeUrl, cfg.Peers, msngr, memberManager)
 	g.StartGossiping()
 
 	// Initialize HTTP Server
 	logger.Info("🌐 Initializing HTTP server")
-	srv := server.NewServer(svc, g, cfg.ServerPort)
+	srv := server.NewServer(svc, memberManager, g, cfg.ServerPort)
 
 	// Start Server in a goroutine
 	serverStarted := make(chan bool, 1)

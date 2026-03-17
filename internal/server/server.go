@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"limedb/internal/gossiper"
 	"limedb/internal/logger"
+	"limedb/internal/membership"
 	"limedb/internal/messenger"
 	"limedb/internal/node"
 	"runtime"
@@ -22,6 +23,7 @@ import (
 // Server represents the HTTP server.
 type Server struct {
 	service    *node.NodeService
+	membership *membership.Manager
 	gossiper   *gossiper.Gossiper
 	port       int
 	httpServer *fasthttp.Server
@@ -39,8 +41,12 @@ type Server struct {
 	totalLatencyMs uint64
 }
 
+type activateNodeRequest struct {
+	NodeURL string `json:"nodeUrl"`
+}
+
 // NewServer creates a new HTTP server.
-func NewServer(service *node.NodeService, gossiper *gossiper.Gossiper, port int) *Server {
+func NewServer(service *node.NodeService, manager *membership.Manager, gossiper *gossiper.Gossiper, port int) *Server {
 	meter := otel.Meter("limedb-node")
 
 	reqCounter, _ := meter.Int64Counter(
@@ -56,8 +62,9 @@ func NewServer(service *node.NodeService, gossiper *gossiper.Gossiper, port int)
 	)
 
 	return &Server{
-		service: service,
-		port:    port,
+		service:    service,
+		membership: manager,
+		port:       port,
 		httpServer: &fasthttp.Server{
 			Handler: nil, // Will be set in Start or here
 		},
@@ -186,6 +193,10 @@ func (s *Server) router(ctx *fasthttp.RequestCtx) {
 		s.handleRingState(ctx)
 	case method == "GET" && path == "/api/v1/cluster/gossip":
 		s.handleGossipMetrics(ctx)
+	case method == "GET" && path == "/api/v1/admin/membership":
+		s.handleMembershipState(ctx)
+	case method == "POST" && path == "/api/v1/admin/membership/activate":
+		s.handleActivateMembership(ctx)
 	case method == "GET" && path == "/api/v1/health":
 		s.handleHealth(ctx)
 	case method == "POST" && path == "/gossip":
@@ -308,11 +319,14 @@ func isInternalRequest(ctx *fasthttp.RequestCtx) bool {
 }
 
 func (s *Server) handleClusterState(ctx *fasthttp.RequestCtx) {
+	membershipState := s.membership.GetState()
 	state := map[string]interface{}{
-		"nodeUrl":    s.service.GetNodeUrl(),
-		"peers":      s.service.GetPeers(),
-		"totalNodes": len(s.service.GetPeers()),
-		"status":     "active",
+		"nodeUrl":       s.service.GetNodeUrl(),
+		"peers":         s.membership.GetPeers(),
+		"totalNodes":    len(s.membership.GetPeers()),
+		"status":        "active",
+		"activeNodes":   membershipState.ActiveNodes,
+		"observedNodes": membershipState.ObservedNodes,
 	}
 
 	body, _ := json.Marshal(state)
@@ -320,8 +334,45 @@ func (s *Server) handleClusterState(ctx *fasthttp.RequestCtx) {
 	ctx.SetBody(body)
 }
 
+func (s *Server) handleMembershipState(ctx *fasthttp.RequestCtx) {
+	if !isInternalRequest(ctx) {
+		ctx.Error("Forbidden", fasthttp.StatusForbidden)
+		return
+	}
+
+	body, _ := json.Marshal(s.membership.GetState())
+	ctx.SetContentType("application/json")
+	ctx.SetBody(body)
+}
+
+func (s *Server) handleActivateMembership(ctx *fasthttp.RequestCtx) {
+	if !isInternalRequest(ctx) {
+		ctx.Error("Forbidden", fasthttp.StatusForbidden)
+		return
+	}
+
+	var req activateNodeRequest
+	if err := json.Unmarshal(ctx.PostBody(), &req); err != nil {
+		ctx.Error("Invalid JSON", fasthttp.StatusBadRequest)
+		return
+	}
+
+	if err := s.membership.ActivateNode(req.NodeURL); err != nil {
+		ctx.Error(err.Error(), fasthttp.StatusBadRequest)
+		return
+	}
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"status":     "activated",
+		"nodeUrl":    req.NodeURL,
+		"membership": s.membership.GetState(),
+	})
+	ctx.SetContentType("application/json")
+	ctx.SetBody(body)
+}
+
 func (s *Server) handleRingState(ctx *fasthttp.RequestCtx) {
-	ring := s.service.GetRing()
+	ring := s.membership.GetRing()
 	stats := ring.GetRingStats()
 	stats["currentNode"] = s.service.GetCurrentNodeUrl()
 	stats["allNodes"] = ring.GetNodes()

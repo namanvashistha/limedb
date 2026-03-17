@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"limedb/internal/logger"
-	"limedb/internal/ring"
+	"limedb/internal/membership"
 	"limedb/internal/store"
 	"time"
 
@@ -49,38 +49,26 @@ type ReplicaNode struct {
 // NodeService manages the node's operations and routing.
 type NodeService struct {
 	currentNodeUrl    string
-	ring              *ring.ConsistentHashRing
+	membership        *membership.Manager
 	store             store.Backend
 	client            *fasthttp.Client
 	replicationFactor int
 }
 
 // NewService creates a new NodeService with an injected store backend.
-func NewService(nodeUrl string, virtualNodes int, peers []string, s store.Backend, replicationFactor int) *NodeService {
-	currentNodeUrl := nodeUrl
-
-	r := ring.New(virtualNodes)
-	// IMPORTANT: Include current node itself in the ring so single-node clusters work
-	r.AddNode(currentNodeUrl)
-	for _, peer := range peers {
-		if peer == currentNodeUrl { // Skip duplicate self reference if present in peer list
-			continue
-		}
-		r.AddNode(peer)
-	}
-
+func NewService(nodeUrl string, manager *membership.Manager, s store.Backend, replicationFactor int) *NodeService {
 	return &NodeService{
-		currentNodeUrl:    currentNodeUrl,
-		ring:              r,
+		currentNodeUrl:    nodeUrl,
+		membership:        manager,
 		store:             s,
 		client:            &fasthttp.Client{MaxConnsPerHost: 1000},
 		replicationFactor: replicationFactor,
 	}
 }
 
-// GetRing returns the underlying hash ring.
-func (s *NodeService) GetRing() *ring.ConsistentHashRing {
-	return s.ring
+// GetMembership returns the membership manager used for routing and activation.
+func (s *NodeService) GetMembership() *membership.Manager {
+	return s.membership
 }
 
 // GetNodeUrl returns the current node URL.
@@ -90,7 +78,7 @@ func (s *NodeService) GetNodeUrl() string {
 
 // GetPeers returns the list of peers in the ring.
 func (s *NodeService) GetPeers() []string {
-	return s.ring.GetNodes()
+	return s.membership.GetPeers()
 }
 
 // GetCurrentNodeUrl returns the current node's URL.
@@ -111,7 +99,7 @@ func (s *NodeService) GetReplicationFactor() int {
 // GetReplicaInfo returns the replica assignment and live status for a key.
 // It probes each replica to check if the key actually exists there.
 func (s *NodeService) GetReplicaInfo(key string) *ReplicaInfo {
-	replicas := s.ring.GetReplicas(key, s.replicationFactor)
+	replicas := s.membership.GetRing().GetReplicas(key, s.replicationFactor)
 	quorum := (s.replicationFactor / 2) + 1
 
 	type probeResult struct {
@@ -161,7 +149,7 @@ func (s *NodeService) GetReplicaInfo(key string) *ReplicaInfo {
 
 // HandleGet handles a GET request with ONE consistency (read from any available replica).
 func (s *NodeService) HandleGet(key string) (*GetResponse, error) {
-	replicas := s.ring.GetReplicas(key, s.replicationFactor)
+	replicas := s.membership.GetRing().GetReplicas(key, s.replicationFactor)
 
 	// Try each replica in order
 	for _, replica := range replicas {
@@ -189,7 +177,7 @@ func (s *NodeService) HandleGet(key string) (*GetResponse, error) {
 // HandleSet handles a SET request with QUORUM consistency.
 // Writes to all replicas in parallel and returns success once QUORUM acks received.
 func (s *NodeService) HandleSet(key, value string) error {
-	replicas := s.ring.GetReplicas(key, s.replicationFactor)
+	replicas := s.membership.GetRing().GetReplicas(key, s.replicationFactor)
 
 	// Calculate QUORUM: ceil(RF/2) + 1
 	quorum := (s.replicationFactor / 2) + 1
@@ -250,12 +238,12 @@ func (s *NodeService) HandleSet(key, value string) error {
 		errMsg += " - errors: " + fmt.Sprint(collectedErrors)
 	}
 	logger.Warn("Write QUORUM failed", "key", key, "acked", successCount, "required", quorum, "rf", s.replicationFactor)
-	return fmt.Errorf(errMsg)
+	return fmt.Errorf("%s", errMsg)
 }
 
 // HandleDelete handles a DELETE request with QUORUM consistency.
 func (s *NodeService) HandleDelete(key string) (bool, error) {
-	replicas := s.ring.GetReplicas(key, s.replicationFactor)
+	replicas := s.membership.GetRing().GetReplicas(key, s.replicationFactor)
 
 	// Calculate QUORUM: ceil(RF/2) + 1
 	quorum := (s.replicationFactor / 2) + 1

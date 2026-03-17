@@ -1,4 +1,4 @@
-import { GossipMetrics, HealthResponse, KeyValueResponse, NodeStatus, ReplicaInfo, RingState } from "./types";
+import { GossipMetrics, HealthResponse, KeyValueResponse, MembershipState, NodeStatus, ReplicaInfo, RingState } from "./types";
 
 const BASE_URL = "/api/proxy";
 
@@ -47,10 +47,7 @@ class ClusterClient {
     gossip: GossipMetrics; 
     nodes: Record<string, NodeStatus>;
   }> {
-    const [gossip, ring] = await Promise.all([
-      this.getGossipMetrics(),
-      this.getRingState(),
-    ]);
+    const gossip = await this.getGossipMetrics();
     
     // Build node status map from gossip peer_details - ALL NODES EQUAL
     const nodes: Record<string, NodeStatus> = {};
@@ -99,6 +96,37 @@ class ClusterClient {
     if (!response.ok) {
       throw new Error("Failed to fetch node health");
     }
+    return response.json();
+  }
+
+  async getMembershipState(nodeUrl?: string): Promise<MembershipState> {
+    const target = nodeUrl || this.seedUrl;
+    const query = `?node=${encodeURIComponent(target)}`;
+    const response = await fetch(`${BASE_URL}/admin/membership${query}`);
+    if (!response.ok) {
+      throw new Error("Failed to fetch membership state");
+    }
+    return response.json();
+  }
+
+  async activateNode(nodeUrl: string, adminNodeUrl?: string): Promise<{
+    status: string;
+    nodeUrl: string;
+    membership: MembershipState;
+  }> {
+    const target = adminNodeUrl || this.seedUrl;
+    const query = `?node=${encodeURIComponent(target)}`;
+    const response = await fetch(`${BASE_URL}/admin/membership/activate${query}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nodeUrl }),
+    });
+
+    if (!response.ok) {
+      const message = await response.text();
+      throw new Error(message || "Failed to activate node");
+    }
+
     return response.json();
   }
 

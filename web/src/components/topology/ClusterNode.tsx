@@ -13,22 +13,25 @@ export interface ClusterNodeData extends Record<string, unknown> {
   generation: number;
   lag: number;
   isSeed?: boolean;
+  membershipState?: "ACTIVE" | "DISCOVERED";
 }
 
-export function ClusterNode(props: any) {
+export function ClusterNode(props: NodeProps) {
   const data = props.data as ClusterNodeData;
   
   const isActive = data.status === "active";
   const isStale = data.status === "stale";
-  const isDead = data.status === "dead";
+  const isDiscoveredOnly = data.membershipState === "DISCOVERED";
 
-  const statusColor = isActive ? "bg-green-500" : isStale ? "bg-yellow-500" : "bg-red-500";
-  const borderColor = isActive ? "border-green-500/50" : isStale ? "border-yellow-500/50" : "border-red-500/50";
-  const bgGradient = isActive 
-    ? "from-green-500/10 to-green-500/5" 
-    : isStale 
-    ? "from-yellow-500/10 to-yellow-500/5" 
-    : "from-red-500/10 to-red-500/5";
+  const statusColor = isDiscoveredOnly ? "bg-sky-500" : isActive ? "bg-green-500" : isStale ? "bg-yellow-500" : "bg-red-500";
+  const borderColor = isDiscoveredOnly ? "border-sky-500/50" : isActive ? "border-green-500/50" : isStale ? "border-yellow-500/50" : "border-red-500/50";
+  const bgGradient = isDiscoveredOnly
+    ? "from-sky-500/10 to-sky-500/5"
+    : isActive 
+      ? "from-green-500/10 to-green-500/5" 
+      : isStale 
+        ? "from-yellow-500/10 to-yellow-500/5" 
+        : "from-red-500/10 to-red-500/5";
 
   const hostname = data.url.split("//")[1] || data.url;
 
@@ -63,8 +66,8 @@ export function ClusterNode(props: any) {
 
         {/* Header: URL and Badge */}
         <div className="flex items-center gap-2 mb-3">
-          <div className={`p-1.5 rounded-md ${isActive ? "bg-green-500/20" : "bg-muted"}`}>
-            <Server className={`h-4 w-4 ${isActive ? "text-green-600" : "text-muted-foreground"}`} />
+          <div className={`p-1.5 rounded-md ${isDiscoveredOnly ? "bg-sky-500/20" : isActive ? "bg-green-500/20" : "bg-muted"}`}>
+            <Server className={`h-4 w-4 ${isDiscoveredOnly ? "text-sky-600" : isActive ? "text-green-600" : "text-muted-foreground"}`} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
@@ -76,12 +79,27 @@ export function ClusterNode(props: any) {
               )}
             </div>
           </div>
-          <Badge 
-            variant={isActive ? "outline" : "destructive"}
-            className={`text-xs ${isActive ? "text-green-600 border-green-600" : ""}`}
-          >
-            {data.status}
-          </Badge>
+          <div className="flex items-center gap-1">
+            {isDiscoveredOnly && (
+              <Badge variant="outline" className="text-xs text-sky-700 border-sky-500">
+                discovered
+              </Badge>
+            )}
+            <Badge 
+              variant={isActive || isStale || isDiscoveredOnly ? "outline" : "destructive"}
+              className={`text-xs ${
+                isDiscoveredOnly
+                  ? "text-sky-700 border-sky-500"
+                  : isActive
+                    ? "text-green-600 border-green-600"
+                    : isStale
+                      ? "text-yellow-700 border-yellow-500"
+                      : ""
+              }`}
+            >
+              {data.status}
+            </Badge>
+          </div>
         </div>
 
         {/* Metrics */}

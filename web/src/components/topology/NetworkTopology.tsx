@@ -17,16 +17,31 @@ import {
 import "@xyflow/react/dist/style.css";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Network, ArrowLeftRight, ArrowRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Network, ArrowLeftRight, ArrowRight, CircleAlert, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { ClusterNode, ClusterNodeData } from "./ClusterNode";
 import type { NodeTypes } from "@xyflow/react";
+import type { GossipMetrics, PeerDetail } from "@/lib/types";
 
 const nodeTypes: NodeTypes = {
-  cluster: ClusterNode as any,
+  cluster: ClusterNode,
 };
 
 type LayoutType = "circle" | "grid" | "force";
+type FetchedGossip = {
+  gossip: GossipMetrics | null;
+  success: boolean;
+};
 
 export function NetworkTopology() {
   const [nodes, setNodes] = useNodesState<Node<ClusterNodeData>>([]);
@@ -34,6 +49,9 @@ export function NetworkTopology() {
   const [loading, setLoading] = useState(true);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [layoutType, setLayoutType] = useState<LayoutType>("circle");
+  const [activationError, setActivationError] = useState<string | null>(null);
+  const [activatingNodeId, setActivatingNodeId] = useState<string | null>(null);
+  const [refreshNonce, setRefreshNonce] = useState(0);
   
   // Track manually positioned nodes to preserve their positions across refreshes
   const manualPositions = useRef<Map<string, { x: number; y: number }>>(new Map());
@@ -41,16 +59,22 @@ export function NetworkTopology() {
   useEffect(() => {
     const fetchTopology = async () => {
       try {
+        const membershipState = await api.getMembershipState();
+
+        const activeMembership = new Set(
+          membershipState.active_nodes.map((node) => node.node_url)
+        );
+
         // Fetch initial gossip from seed
         const seedGossip = await api.getGossipMetrics();
         
         // Discover all nodes recursively by following peer references
         const discoveredNodes = new Set<string>([seedGossip.node_url]);
         const toFetch = new Set<string>([seedGossip.node_url]);
-        const gossipData = new Map<string, any>();
+        const gossipData = new Map<string, FetchedGossip>();
         
         // Add seed's peers to discovery
-        seedGossip.peer_details.forEach(p => {
+        seedGossip.peer_details.forEach((p: PeerDetail) => {
           discoveredNodes.add(p.url);
           toFetch.add(p.url);
         });
@@ -66,13 +90,13 @@ export function NetworkTopology() {
               gossipData.set(nodeUrl, { gossip, success: true });
               
               // Discover any new peers mentioned by this node
-              gossip.peer_details.forEach(p => {
+              gossip.peer_details.forEach((p: PeerDetail) => {
                 if (!discoveredNodes.has(p.url)) {
                   discoveredNodes.add(p.url);
                   toFetch.add(p.url);
                 }
               });
-            } catch (err) {
+            } catch {
               gossipData.set(nodeUrl, { gossip: null, success: false });
             }
           });
@@ -97,7 +121,7 @@ export function NetworkTopology() {
         const peerOpinions = new Map<string, Array<{ status: string; lag: number }>>();
         gossipData.forEach((data) => {
           if (!data.success || !data.gossip) return;
-          data.gossip.peer_details.forEach((pd: any) => {
+          data.gossip.peer_details.forEach((pd: PeerDetail) => {
             if (!peerOpinions.has(pd.url)) peerOpinions.set(pd.url, []);
             peerOpinions.get(pd.url)!.push({ status: pd.status, lag: pd.lag });
           });
@@ -166,6 +190,7 @@ export function NetworkTopology() {
               generation: gossip.generation || 0,
               lag: consensus.lag,
               isSeed: nodeUrl === seedGossip.node_url,
+              membershipState: activeMembership.has(nodeUrl) ? "ACTIVE" : "DISCOVERED",
             };
             
             newNodes.push({
@@ -177,7 +202,7 @@ export function NetworkTopology() {
             });
             
             // Create edges from this node to its peers
-            gossip.peer_details.forEach((peer: any) => {
+            gossip.peer_details.forEach((peer: PeerDetail) => {
               const edgeKey = [nodeUrl, peer.url].sort().join("--");
               
               if (edgeMap.has(edgeKey)) {
@@ -207,6 +232,7 @@ export function NetworkTopology() {
                 generation: 0,
                 lag: 0,
                 isSeed: nodeUrl === seedGossip.node_url,
+                membershipState: activeMembership.has(nodeUrl) ? "ACTIVE" : "DISCOVERED",
               },
               className: selectedNodeId && selectedNodeId !== nodeUrl ? "opacity-30" : "",
             });
@@ -311,7 +337,7 @@ export function NetworkTopology() {
     fetchTopology();
     const interval = setInterval(fetchTopology, 5000);
     return () => clearInterval(interval);
-  }, [setNodes, setEdges, selectedNodeId, layoutType]); // Re-run when selection or layout changes
+  }, [setNodes, setEdges, selectedNodeId, layoutType, refreshNonce]); // Re-run when selection or layout changes
 
   const handleLayoutChange = useCallback((newLayout: LayoutType) => {
     setLayoutType(newLayout);
@@ -326,6 +352,36 @@ export function NetworkTopology() {
   const handlePaneClick = useCallback(() => {
     setSelectedNodeId(null);
   }, []);
+
+  const selectedNode = useMemo(
+    () => nodes.find((node) => node.id === selectedNodeId) ?? null,
+    [nodes, selectedNodeId]
+  );
+
+  const selectedMembershipState = selectedNode?.data.membershipState;
+  const canActivateSelectedNode =
+    selectedNodeId !== null &&
+    selectedMembershipState === "DISCOVERED" &&
+    activatingNodeId !== selectedNodeId;
+
+  const handleActivateNode = useCallback(async () => {
+    if (!selectedNodeId) {
+      return;
+    }
+
+    setActivationError(null);
+    setActivatingNodeId(selectedNodeId);
+
+    try {
+      await api.activateNode(selectedNodeId);
+      setRefreshNonce((current) => current + 1);
+      setSelectedNodeId(null);
+    } catch (error) {
+      setActivationError(error instanceof Error ? error.message : "Failed to activate node");
+    } finally {
+      setActivatingNodeId(null);
+    }
+  }, [selectedNodeId]);
 
   const edgeTypeCounts = useMemo(() => {
     const bidirectional = edges.filter(e => !e.animated).length; // Bidirectional are NOT animated
@@ -442,12 +498,99 @@ export function NetworkTopology() {
           <MiniMap
             nodeColor={(node) => {
               const data = node.data as ClusterNodeData;
+              if (data.membershipState === "DISCOVERED") return "#0ea5e9";
               return data.status === "active" ? "#84cc16" : data.status === "stale" ? "#eab308" : "#ef4444";
             }}
             className="!border !shadow-sm !bg-background"
           />
           </ReactFlow>
         </div>
+
+        <Dialog open={selectedNodeId !== null} onOpenChange={(open) => !open && setSelectedNodeId(null)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Node Details</DialogTitle>
+              <DialogDescription>
+                Review the node&apos;s topology role and activate it when you want it to join active routing.
+              </DialogDescription>
+            </DialogHeader>
+
+            {selectedNode && (
+              <div className="space-y-4">
+                <div className="rounded-lg border bg-muted/30 p-4">
+                  <div className="font-mono text-sm break-all">{selectedNode.data.url}</div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Badge variant="outline">{selectedNode.data.status}</Badge>
+                    <Badge
+                      variant="outline"
+                      className={
+                        selectedNode.data.membershipState === "ACTIVE"
+                          ? "border-green-600 text-green-700"
+                          : "border-sky-500 text-sky-700"
+                      }
+                    >
+                      {selectedNode.data.membershipState === "ACTIVE" ? "active membership" : "discovered only"}
+                    </Badge>
+                    {selectedNode.data.isSeed && <Badge variant="secondary">seed</Badge>}
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-3 text-sm text-muted-foreground">
+                    <div>
+                      <div className="text-xs uppercase tracking-wide">Peers</div>
+                      <div className="mt-1 text-foreground">{selectedNode.data.peers}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs uppercase tracking-wide">Heartbeat</div>
+                      <div className="mt-1 text-foreground">{selectedNode.data.heartbeat}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs uppercase tracking-wide">Generation</div>
+                      <div className="mt-1 text-foreground">{selectedNode.data.generation}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs uppercase tracking-wide">Lag</div>
+                      <div className="mt-1 text-foreground">{selectedNode.data.lag}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {selectedNode.data.membershipState === "DISCOVERED" && (
+                  <Alert>
+                    <CircleAlert className="h-4 w-4" />
+                    <AlertTitle>Not in active routing yet</AlertTitle>
+                    <AlertDescription>
+                      This node is visible through gossip, but it will not receive routed traffic until an operator activates it.
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {activationError && (
+                  <Alert variant="destructive">
+                    <CircleAlert className="h-4 w-4" />
+                    <AlertTitle>Activation failed</AlertTitle>
+                    <AlertDescription>{activationError}</AlertDescription>
+                  </Alert>
+                )}
+
+              </div>
+            )}
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setSelectedNodeId(null)}>
+                Close
+              </Button>
+              <Button onClick={handleActivateNode} disabled={!canActivateSelectedNode}>
+                {activatingNodeId === selectedNodeId ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Activating
+                  </>
+                ) : (
+                  "Activate Node"
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
         
         {/* Enhanced Legend */}
         <div className="absolute bottom-4 left-4 bg-background/95 backdrop-blur-sm border rounded-lg p-4 shadow-lg text-xs max-w-xs">
@@ -502,6 +645,10 @@ export function NetworkTopology() {
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 bg-red-500 rounded-full"></div>
               <span className="flex-1">Dead</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 bg-sky-500 rounded-full"></div>
+              <span className="flex-1">Discovered only</span>
             </div>
           </div>
         </div>

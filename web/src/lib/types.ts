@@ -105,3 +105,15 @@ export interface KeyValueResponse {
   body: string | object;
   error?: string;
 }
+
+export interface MembershipNode {
+  node_url: string;
+  state: "ACTIVE" | "DISCOVERED";
+  is_local: boolean;
+}
+
+export interface MembershipState {
+  current_node_url: string;
+  observed_nodes: MembershipNode[];
+  active_nodes: MembershipNode[];
+}

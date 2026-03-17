@@ -44,7 +44,7 @@ func Load() *Config {
 	defaultNodeUrl := getEnv("NODE_URL", fmt.Sprintf("http://localhost:%d", defaultPort))
 	defaultPeers := getEnv("NODE_PEERS", "")
 	defaultVirtualNodes := getEnvInt("VIRTUAL_NODES", 256)
-	defaultOtel := getEnv("OTEL_ENDPOINT", "localhost:4317")
+	defaultOtel := getEnv("OTEL_ENDPOINT", "")
 	defaultDataDir := getEnv("DATA_DIR", func() string {
 		if h, err := os.UserHomeDir(); err == nil {
 			return filepath.Join(h, ".limedb")

@@ -4,10 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"limedb/internal/logger"
+	"limedb/internal/membership"
 	"limedb/internal/messenger"
-	"limedb/internal/node"
 	"math/rand"
-	"slices"
 	"sync"
 	"time"
 )
@@ -37,10 +36,10 @@ type Gossiper struct {
 	peerStates map[string]peerState // keyed by peer URL
 	messenger  *messenger.Messenger
 	mu         sync.Mutex
-	node       *node.NodeService
+	membership *membership.Manager
 }
 
-func NewGossiper(currentNodeUrl string, peers []string, msngr *messenger.Messenger, svc *node.NodeService) *Gossiper {
+func NewGossiper(currentNodeUrl string, peers []string, msngr *messenger.Messenger, manager *membership.Manager) *Gossiper {
 	validPeers := make([]string, 0, len(peers))
 	for _, p := range peers {
 		if p != currentNodeUrl {
@@ -58,12 +57,12 @@ func NewGossiper(currentNodeUrl string, peers []string, msngr *messenger.Messeng
 		peers:          validPeers,
 		peerStates:     states,
 		messenger:      msngr,
-		node:           svc,
+		membership:     manager,
 	}
 }
 
 func (g *Gossiper) StartGossiping() {
-	ticker := time.NewTicker(20 * time.Second)
+	ticker := time.NewTicker(5 * time.Second)
 	go func() {
 		for range ticker.C {
 			g.gossipRound()
@@ -246,8 +245,8 @@ func (g *Gossiper) handleSyn(payload SynPayload) AckPayload {
 			g.peerStates[d.NodeURL] = peerState{}
 			logger.Info("New peer discovered via gossip", "peer", d.NodeURL)
 		}
-		if !slices.Contains(g.node.GetRing().GetNodes(), d.NodeURL) {
-			g.node.GetRing().AddNode(d.NodeURL)
+		if g.membership.ObserveNode(d.NodeURL) {
+			logger.Info("Peer recorded as discovered", "peer", d.NodeURL)
 		}
 
 		local := g.peerStates[d.NodeURL]
