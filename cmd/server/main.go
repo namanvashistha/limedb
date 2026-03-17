@@ -9,7 +9,6 @@ import (
 	"limedb/internal/messenger"
 	"limedb/internal/node"
 	"limedb/internal/server"
-	"limedb/internal/store"
 	"limedb/internal/store/lsm"
 	"limedb/internal/telemetry"
 	"log"
@@ -65,38 +64,18 @@ func main() {
 	lsmDir := filepath.Join(cfg.DataDir, cfg.NodeUrl+"_lsm")
 	logger.Info("💾 Initializing LSM store", "dir", lsmDir)
 
-	var backend store.Backend
 	lsmStore, err := lsm.NewStore(lsm.Config{
 		Dir:                 lsmDir,
 		MemTableFlushBytes:  50 * 1024 * 1024,
 		CompactionThreshold: 4,
 	})
 	if err != nil {
-		logger.Warn("⚠️  LSM store initialization failed", "error", err.Error())
-
-		// Attempt recovery: remove corrupted data and retry once
-		logger.Info("🔄 Attempting recovery: removing corrupted data and retrying...")
-		if err := os.RemoveAll(lsmDir); err != nil {
-			logger.Error("❌ Failed to remove corrupted data", "error", err.Error())
-		}
-
-		// Retry LSM store initialization
-		lsmStore, err = lsm.NewStore(lsm.Config{
-			Dir:                 lsmDir,
-			MemTableFlushBytes:  50 * 1024 * 1024,
-			CompactionThreshold: 4,
-		})
-		if err != nil {
-			logger.Warn("⚠️  LSM store recovery failed, falling back to memory store", "error", err.Error())
-			backend = store.NewMemory()
-		} else {
-			logger.Info("✅ LSM store recovered successfully", "dir", lsmDir)
-			backend = lsmStore
-		}
-	} else {
-		logger.Info("✅ LSM store ready", "dir", lsmDir, "keys", lsmStore.Count())
-		backend = lsmStore
+		logger.Error("❌ LSM store initialization failed", "error", err.Error())
+		logger.Error("🛑 FATAL: Cannot start without persistent LSM storage", "dir", lsmDir)
+		log.Fatalf("LSM store initialization failed: %v. Manual intervention required at %s", err, lsmDir)
 	}
+	logger.Info("✅ LSM store ready", "dir", lsmDir, "keys", lsmStore.Count())
+	backend := lsmStore
 
 	// Initialize Node Service
 	logger.Info("🔧 Initializing node service")
