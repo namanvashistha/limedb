@@ -68,7 +68,7 @@ func main() {
 	var backend store.Backend
 	lsmStore, err := lsm.NewStore(lsm.Config{
 		Dir:                 lsmDir,
-		MemTableFlushBytes:  100 * 1024 * 1024,
+		MemTableFlushBytes:  50 * 1024 * 1024,
 		CompactionThreshold: 4,
 	})
 	if err != nil {
@@ -83,7 +83,7 @@ func main() {
 		// Retry LSM store initialization
 		lsmStore, err = lsm.NewStore(lsm.Config{
 			Dir:                 lsmDir,
-			MemTableFlushBytes:  100 * 1024 * 1024,
+			MemTableFlushBytes:  50 * 1024 * 1024,
 			CompactionThreshold: 4,
 		})
 		if err != nil {
