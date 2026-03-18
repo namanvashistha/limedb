@@ -27,11 +27,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Network, ArrowLeftRight, ArrowRight, CircleAlert, Loader2 } from "lucide-react";
+import { Network, ArrowLeftRight, ArrowRight, CheckCircle2, CircleAlert, Loader2, Play, Rocket } from "lucide-react";
 import { api } from "@/lib/api";
 import { ClusterNode, ClusterNodeData } from "./ClusterNode";
 import type { NodeTypes } from "@xyflow/react";
-import type { GossipMetrics, PeerDetail } from "@/lib/types";
+import type { BootstrapPlan, GossipMetrics, MembershipNode, PeerDetail, PlacementState } from "@/lib/types";
 
 const nodeTypes: NodeTypes = {
   cluster: ClusterNode,
@@ -49,8 +49,12 @@ export function NetworkTopology() {
   const [loading, setLoading] = useState(true);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [layoutType, setLayoutType] = useState<LayoutType>("circle");
-  const [activationError, setActivationError] = useState<string | null>(null);
-  const [activatingNodeId, setActivatingNodeId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [placementState, setPlacementState] = useState<PlacementState | null>(null);
+  const [bootstrapPlan, setBootstrapPlan] = useState<BootstrapPlan | null>(null);
+  const [pendingNodeId, setPendingNodeId] = useState<string | null>(null);
+  const [currentAction, setCurrentAction] = useState<string | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
   
   // Track manually positioned nodes to preserve their positions across refreshes
@@ -59,11 +63,23 @@ export function NetworkTopology() {
   useEffect(() => {
     const fetchTopology = async () => {
       try {
-        const membershipState = await api.getMembershipState();
+        const [membershipState, latestPlacementState, latestBootstrapPlan] = await Promise.all([
+          api.getMembershipState(),
+          api.getPlacementState(),
+          api.getBootstrapPlan().catch(() => null),
+        ]);
+        setPlacementState(latestPlacementState);
+        setBootstrapPlan(latestBootstrapPlan);
 
-        const activeMembership = new Set(
-          membershipState.active_nodes.map((node) => node.node_url)
-        );
+        const membershipByUrl = new Map<string, MembershipNode>();
+        membershipState.observed_nodes.forEach((node) => {
+          membershipByUrl.set(node.node_url, node);
+        });
+
+        const pendingTargetNode = latestBootstrapPlan?.target_node_url ?? latestPlacementState?.pending?.members.find(
+          (member) => !(latestPlacementState.active?.members ?? []).some((active) => active.node_url === member.node_url)
+        )?.node_url ?? null;
+        setPendingNodeId(pendingTargetNode);
 
         // Fetch initial gossip from seed
         const seedGossip = await api.getGossipMetrics();
@@ -190,7 +206,11 @@ export function NetworkTopology() {
               generation: gossip.generation || 0,
               lag: consensus.lag,
               isSeed: nodeUrl === seedGossip.node_url,
-              membershipState: activeMembership.has(nodeUrl) ? "ACTIVE" : "DISCOVERED",
+              membershipState: pendingTargetNode === nodeUrl
+                ? "BOOTSTRAPPING"
+                : membershipByUrl.get(nodeUrl)?.state === "ACTIVE"
+                  ? "ACTIVE"
+                  : "DISCOVERED",
             };
             
             newNodes.push({
@@ -232,7 +252,11 @@ export function NetworkTopology() {
                 generation: 0,
                 lag: 0,
                 isSeed: nodeUrl === seedGossip.node_url,
-                membershipState: activeMembership.has(nodeUrl) ? "ACTIVE" : "DISCOVERED",
+                membershipState: pendingTargetNode === nodeUrl
+                  ? "BOOTSTRAPPING"
+                  : membershipByUrl.get(nodeUrl)?.state === "ACTIVE"
+                    ? "ACTIVE"
+                    : "DISCOVERED",
               },
               className: selectedNodeId && selectedNodeId !== nodeUrl ? "opacity-30" : "",
             });
@@ -359,29 +383,71 @@ export function NetworkTopology() {
   );
 
   const selectedMembershipState = selectedNode?.data.membershipState;
+  const selectedNodeIsPendingTarget = selectedNodeId !== null && pendingNodeId === selectedNodeId;
+  const bootstrapStatus = bootstrapPlan?.status ?? null;
   const canActivateSelectedNode =
     selectedNodeId !== null &&
     selectedMembershipState === "DISCOVERED" &&
-    activatingNodeId !== selectedNodeId;
+    currentAction === null;
+  const canStartBootstrap =
+    selectedNodeIsPendingTarget &&
+    bootstrapStatus === "PLANNED" &&
+    currentAction === null;
+  const canCompleteBootstrap =
+    selectedNodeIsPendingTarget &&
+    bootstrapStatus === "RUNNING" &&
+    currentAction === null;
+  const canPromotePlacement =
+    selectedNodeIsPendingTarget &&
+    bootstrapStatus === "COMPLETED" &&
+    placementState?.pending &&
+    currentAction === null;
+
+  const runControlPlaneAction = useCallback(async (action: string, operation: () => Promise<void>) => {
+    setActionError(null);
+    setActionSuccess(null);
+    setCurrentAction(action);
+    try {
+      await operation();
+      setRefreshNonce((current) => current + 1);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Control plane action failed");
+    } finally {
+      setCurrentAction(null);
+    }
+  }, []);
 
   const handleActivateNode = useCallback(async () => {
     if (!selectedNodeId) {
       return;
     }
 
-    setActivationError(null);
-    setActivatingNodeId(selectedNodeId);
-
-    try {
+    await runControlPlaneAction("activate", async () => {
       await api.activateNode(selectedNodeId);
-      setRefreshNonce((current) => current + 1);
-      setSelectedNodeId(null);
-    } catch (error) {
-      setActivationError(error instanceof Error ? error.message : "Failed to activate node");
-    } finally {
-      setActivatingNodeId(null);
-    }
-  }, [selectedNodeId]);
+      setActionSuccess(`${selectedNodeId} activated in membership. Pending placement created.`);
+    });
+  }, [runControlPlaneAction, selectedNodeId]);
+
+  const handleStartBootstrap = useCallback(async () => {
+    await runControlPlaneAction("bootstrap-start", async () => {
+      const response = await api.startBootstrap();
+      setActionSuccess(`Bootstrap started for ${response.bootstrap.target_node_url}.`);
+    });
+  }, [runControlPlaneAction]);
+
+  const handleCompleteBootstrap = useCallback(async () => {
+    await runControlPlaneAction("bootstrap-complete", async () => {
+      const response = await api.completeBootstrap();
+      setActionSuccess(`Bootstrap completed for ${response.bootstrap.target_node_url}.`);
+    });
+  }, [runControlPlaneAction]);
+
+  const handlePromotePlacement = useCallback(async () => {
+    await runControlPlaneAction("placement-promote", async () => {
+      const response = await api.promotePlacement();
+      setActionSuccess(`Placement epoch ${response.activePlacement?.epoch ?? "?"} is now active.`);
+    });
+  }, [runControlPlaneAction]);
 
   const edgeTypeCounts = useMemo(() => {
     const bidirectional = edges.filter(e => !e.animated).length; // Bidirectional are NOT animated
@@ -532,6 +598,11 @@ export function NetworkTopology() {
                       {selectedNode.data.membershipState === "ACTIVE" ? "active membership" : "discovered only"}
                     </Badge>
                     {selectedNode.data.isSeed && <Badge variant="secondary">seed</Badge>}
+                    {selectedNodeIsPendingTarget && placementState?.pending && (
+                      <Badge variant="outline" className="border-amber-500 text-amber-700">
+                        pending placement e{placementState.pending.epoch}
+                      </Badge>
+                    )}
                   </div>
                   <div className="mt-4 grid grid-cols-2 gap-3 text-sm text-muted-foreground">
                     <div>
@@ -563,14 +634,60 @@ export function NetworkTopology() {
                   </Alert>
                 )}
 
-                {activationError && (
+                {selectedNodeIsPendingTarget && bootstrapPlan && (
+                  <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-sm font-medium">Bootstrap Plan</div>
+                        <div className="text-xs text-muted-foreground">
+                          Source epoch {bootstrapPlan.source_epoch} to placement epoch {bootstrapPlan.placement_epoch}
+                        </div>
+                      </div>
+                      <Badge variant="outline" className="border-amber-500 text-amber-700">
+                        {bootstrapPlan.status.toLowerCase()}
+                      </Badge>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-sm text-muted-foreground">
+                      <div>
+                        <div className="text-xs uppercase tracking-wide">Target</div>
+                        <div className="mt-1 text-foreground break-all">{bootstrapPlan.target_node_url}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs uppercase tracking-wide">Ranges</div>
+                        <div className="mt-1 text-foreground">{bootstrapPlan.ranges.length}</div>
+                      </div>
+                    </div>
+                    {bootstrapPlan.ranges.length > 0 && (
+                      <div className="rounded-md border bg-background p-3 text-xs">
+                        <div className="mb-2 text-muted-foreground">Transfer preview</div>
+                        <div className="space-y-1">
+                          {bootstrapPlan.ranges.slice(0, 3).map((range) => (
+                            <div key={`${range.token}-${range.to_node}`} className="flex items-center justify-between gap-3">
+                              <span className="font-mono truncate">token {String(range.token)}</span>
+                              <Badge variant="outline">{range.status.toLowerCase()}</Badge>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {actionError && (
                   <Alert variant="destructive">
                     <CircleAlert className="h-4 w-4" />
-                    <AlertTitle>Activation failed</AlertTitle>
-                    <AlertDescription>{activationError}</AlertDescription>
+                    <AlertTitle>Control plane action failed</AlertTitle>
+                    <AlertDescription>{actionError}</AlertDescription>
                   </Alert>
                 )}
 
+                {actionSuccess && (
+                  <Alert>
+                    <CheckCircle2 className="h-4 w-4" />
+                    <AlertTitle>Action applied</AlertTitle>
+                    <AlertDescription>{actionSuccess}</AlertDescription>
+                  </Alert>
+                )}
               </div>
             )}
 
@@ -578,8 +695,47 @@ export function NetworkTopology() {
               <Button variant="outline" onClick={() => setSelectedNodeId(null)}>
                 Close
               </Button>
+              <Button variant="outline" onClick={handleStartBootstrap} disabled={!canStartBootstrap}>
+                {currentAction === "bootstrap-start" ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Starting
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-4 w-4" />
+                    Start Bootstrap
+                  </>
+                )}
+              </Button>
+              <Button variant="outline" onClick={handleCompleteBootstrap} disabled={!canCompleteBootstrap}>
+                {currentAction === "bootstrap-complete" ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Completing
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="h-4 w-4" />
+                    Complete Bootstrap
+                  </>
+                )}
+              </Button>
+              <Button variant="outline" onClick={handlePromotePlacement} disabled={!canPromotePlacement}>
+                {currentAction === "placement-promote" ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Promoting
+                  </>
+                ) : (
+                  <>
+                    <Rocket className="h-4 w-4" />
+                    Promote Placement
+                  </>
+                )}
+              </Button>
               <Button onClick={handleActivateNode} disabled={!canActivateSelectedNode}>
-                {activatingNodeId === selectedNodeId ? (
+                {currentAction === "activate" ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Activating
@@ -649,6 +805,10 @@ export function NetworkTopology() {
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 bg-sky-500 rounded-full"></div>
               <span className="flex-1">Discovered only</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 bg-amber-500 rounded-full"></div>
+              <span className="flex-1">Bootstrapping</span>
             </div>
           </div>
         </div>

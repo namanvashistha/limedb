@@ -13,7 +13,7 @@ export interface ClusterNodeData extends Record<string, unknown> {
   generation: number;
   lag: number;
   isSeed?: boolean;
-  membershipState?: "ACTIVE" | "DISCOVERED";
+  membershipState?: "ACTIVE" | "BOOTSTRAPPING" | "DISCOVERED";
 }
 
 export function ClusterNode(props: NodeProps) {
@@ -22,11 +22,14 @@ export function ClusterNode(props: NodeProps) {
   const isActive = data.status === "active";
   const isStale = data.status === "stale";
   const isDiscoveredOnly = data.membershipState === "DISCOVERED";
+  const isBootstrapping = data.membershipState === "BOOTSTRAPPING";
 
-  const statusColor = isDiscoveredOnly ? "bg-sky-500" : isActive ? "bg-green-500" : isStale ? "bg-yellow-500" : "bg-red-500";
-  const borderColor = isDiscoveredOnly ? "border-sky-500/50" : isActive ? "border-green-500/50" : isStale ? "border-yellow-500/50" : "border-red-500/50";
+  const statusColor = isDiscoveredOnly ? "bg-sky-500" : isBootstrapping ? "bg-amber-500" : isActive ? "bg-green-500" : isStale ? "bg-yellow-500" : "bg-red-500";
+  const borderColor = isDiscoveredOnly ? "border-sky-500/50" : isBootstrapping ? "border-amber-500/50" : isActive ? "border-green-500/50" : isStale ? "border-yellow-500/50" : "border-red-500/50";
   const bgGradient = isDiscoveredOnly
     ? "from-sky-500/10 to-sky-500/5"
+    : isBootstrapping
+      ? "from-amber-500/10 to-amber-500/5"
     : isActive 
       ? "from-green-500/10 to-green-500/5" 
       : isStale 
@@ -66,8 +69,8 @@ export function ClusterNode(props: NodeProps) {
 
         {/* Header: URL and Badge */}
         <div className="flex items-center gap-2 mb-3">
-          <div className={`p-1.5 rounded-md ${isDiscoveredOnly ? "bg-sky-500/20" : isActive ? "bg-green-500/20" : "bg-muted"}`}>
-            <Server className={`h-4 w-4 ${isDiscoveredOnly ? "text-sky-600" : isActive ? "text-green-600" : "text-muted-foreground"}`} />
+          <div className={`p-1.5 rounded-md ${isDiscoveredOnly ? "bg-sky-500/20" : isBootstrapping ? "bg-amber-500/20" : isActive ? "bg-green-500/20" : "bg-muted"}`}>
+            <Server className={`h-4 w-4 ${isDiscoveredOnly ? "text-sky-600" : isBootstrapping ? "text-amber-600" : isActive ? "text-green-600" : "text-muted-foreground"}`} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
@@ -80,6 +83,11 @@ export function ClusterNode(props: NodeProps) {
             </div>
           </div>
           <div className="flex items-center gap-1">
+            {isBootstrapping && (
+              <Badge variant="outline" className="text-xs text-amber-700 border-amber-500">
+                bootstrapping
+              </Badge>
+            )}
             {isDiscoveredOnly && (
               <Badge variant="outline" className="text-xs text-sky-700 border-sky-500">
                 discovered
@@ -90,6 +98,8 @@ export function ClusterNode(props: NodeProps) {
               className={`text-xs ${
                 isDiscoveredOnly
                   ? "text-sky-700 border-sky-500"
+                  : isBootstrapping
+                    ? "text-amber-700 border-amber-500"
                   : isActive
                     ? "text-green-600 border-green-600"
                     : isStale

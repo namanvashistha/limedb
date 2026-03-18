@@ -138,6 +138,11 @@ export interface TokenAssignment {
 }
 
 export interface PlacementState {
+  active?: PlacementSnapshot;
+  pending?: PlacementSnapshot;
+}
+
+export interface PlacementSnapshot {
   epoch: number;
   status: "PENDING" | "ACTIVE";
   virtual_nodes: number;
@@ -145,4 +150,25 @@ export interface PlacementState {
   members: PlacementMember[];
   tokens: TokenAssignment[];
   created_at_unix: number;
+}
+
+export interface BootstrapRange {
+  start_token: number;
+  end_token: number;
+  token: number;
+  from_nodes: string[];
+  to_node: string;
+  status: "PENDING" | "COPYING" | "VERIFIED" | "FAILED";
+  keys_copied: number;
+}
+
+export interface BootstrapPlan {
+  plan_id: string;
+  target_node_url: string;
+  placement_epoch: number;
+  source_epoch: number;
+  status: "PLANNED" | "RUNNING" | "COMPLETED" | "FAILED";
+  ranges: BootstrapRange[];
+  started_at_unix: number;
+  completed_at_unix?: number;
 }

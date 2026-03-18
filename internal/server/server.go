@@ -202,6 +202,14 @@ func (s *Server) router(ctx *fasthttp.RequestCtx) {
 		s.handleActivateMembership(ctx)
 	case method == "GET" && path == "/api/v1/admin/placement":
 		s.handlePlacementState(ctx)
+	case method == "POST" && path == "/api/v1/admin/placement/promote":
+		s.handlePromotePlacement(ctx)
+	case method == "GET" && path == "/api/v1/admin/bootstrap":
+		s.handleBootstrapState(ctx)
+	case method == "POST" && path == "/api/v1/admin/bootstrap/start":
+		s.handleBootstrapStart(ctx)
+	case method == "POST" && path == "/api/v1/admin/bootstrap/complete":
+		s.handleBootstrapComplete(ctx)
 	case method == "GET" && path == "/api/v1/health":
 		s.handleHealth(ctx)
 	case method == "POST" && path == "/gossip":
@@ -338,6 +346,13 @@ func (s *Server) handleClusterState(ctx *fasthttp.RequestCtx) {
 			}
 			return snapshot.Epoch
 		}(),
+		"pendingPlacementEpoch": func() int64 {
+			state := s.placement.State()
+			if state == nil || state.Pending == nil {
+				return 0
+			}
+			return state.Pending.Epoch
+		}(),
 		"activeNodes":   membershipState.ActiveNodes,
 		"observedNodes": membershipState.ObservedNodes,
 		"desiredNodes":  membershipState.DesiredNodes,
@@ -365,7 +380,7 @@ func (s *Server) handlePlacementState(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	body, _ := json.Marshal(s.placement.Snapshot())
+	body, _ := json.Marshal(s.placement.State())
 	ctx.SetContentType("application/json")
 	ctx.SetBody(body)
 }
@@ -386,13 +401,89 @@ func (s *Server) handleActivateMembership(ctx *fasthttp.RequestCtx) {
 		ctx.Error(err.Error(), fasthttp.StatusBadRequest)
 		return
 	}
-	s.placement.Rebuild()
+	pending, err := s.placement.CreatePendingFromMembership(req.NodeURL)
+	if err != nil {
+		ctx.Error(err.Error(), fasthttp.StatusBadRequest)
+		return
+	}
 
 	body, _ := json.Marshal(map[string]interface{}{
-		"status":     "activated",
-		"nodeUrl":    req.NodeURL,
-		"membership": s.membership.GetState(),
-		"placement":  s.placement.Snapshot(),
+		"status":           "activation_requested",
+		"nodeUrl":          req.NodeURL,
+		"membership":       s.membership.GetState(),
+		"activePlacement":  s.placement.Snapshot(),
+		"pendingPlacement": pending,
+	})
+	ctx.SetContentType("application/json")
+	ctx.SetBody(body)
+}
+
+func (s *Server) handlePromotePlacement(ctx *fasthttp.RequestCtx) {
+	if !isInternalRequest(ctx) {
+		ctx.Error("Forbidden", fasthttp.StatusForbidden)
+		return
+	}
+
+	active, err := s.placement.PromotePending()
+	if err != nil {
+		ctx.Error(err.Error(), fasthttp.StatusBadRequest)
+		return
+	}
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"status":          "placement_promoted",
+		"activePlacement": active,
+	})
+	ctx.SetContentType("application/json")
+	ctx.SetBody(body)
+}
+
+func (s *Server) handleBootstrapState(ctx *fasthttp.RequestCtx) {
+	if !isInternalRequest(ctx) {
+		ctx.Error("Forbidden", fasthttp.StatusForbidden)
+		return
+	}
+
+	body, _ := json.Marshal(s.placement.BootstrapPlan())
+	ctx.SetContentType("application/json")
+	ctx.SetBody(body)
+}
+
+func (s *Server) handleBootstrapStart(ctx *fasthttp.RequestCtx) {
+	if !isInternalRequest(ctx) {
+		ctx.Error("Forbidden", fasthttp.StatusForbidden)
+		return
+	}
+
+	plan, err := s.placement.StartBootstrap()
+	if err != nil {
+		ctx.Error(err.Error(), fasthttp.StatusBadRequest)
+		return
+	}
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"status":    "bootstrap_started",
+		"bootstrap": plan,
+	})
+	ctx.SetContentType("application/json")
+	ctx.SetBody(body)
+}
+
+func (s *Server) handleBootstrapComplete(ctx *fasthttp.RequestCtx) {
+	if !isInternalRequest(ctx) {
+		ctx.Error("Forbidden", fasthttp.StatusForbidden)
+		return
+	}
+
+	plan, err := s.placement.CompleteBootstrap()
+	if err != nil {
+		ctx.Error(err.Error(), fasthttp.StatusBadRequest)
+		return
+	}
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"status":    "bootstrap_completed",
+		"bootstrap": plan,
 	})
 	ctx.SetContentType("application/json")
 	ctx.SetBody(body)
@@ -407,6 +498,9 @@ func (s *Server) handleRingState(ctx *fasthttp.RequestCtx) {
 	stats["rangesDegrees"] = ring.GetNodeRangesDegrees()
 	if snapshot := s.placement.Snapshot(); snapshot != nil {
 		stats["placementEpoch"] = snapshot.Epoch
+	}
+	if state := s.placement.State(); state != nil && state.Pending != nil {
+		stats["pendingPlacementEpoch"] = state.Pending.Epoch
 	}
 
 	body, _ := json.Marshal(stats)

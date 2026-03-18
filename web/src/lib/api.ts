@@ -1,4 +1,4 @@
-import { GossipMetrics, HealthResponse, KeyValueResponse, MembershipState, NodeStatus, PlacementState, ReplicaInfo, RingState } from "./types";
+import { BootstrapPlan, GossipMetrics, HealthResponse, KeyValueResponse, MembershipState, NodeStatus, PlacementState, ReplicaInfo, RingState } from "./types";
 
 const BASE_URL = "/api/proxy";
 
@@ -123,6 +123,8 @@ class ClusterClient {
     status: string;
     nodeUrl: string;
     membership: MembershipState;
+    activePlacement?: PlacementState["active"];
+    pendingPlacement?: PlacementState["pending"];
   }> {
     const target = adminNodeUrl || this.seedUrl;
     const query = `?node=${encodeURIComponent(target)}`;
@@ -137,6 +139,63 @@ class ClusterClient {
       throw new Error(message || "Failed to activate node");
     }
 
+    return response.json();
+  }
+
+  async promotePlacement(adminNodeUrl?: string): Promise<{
+    status: string;
+    activePlacement: PlacementState["active"];
+  }> {
+    const target = adminNodeUrl || this.seedUrl;
+    const query = `?node=${encodeURIComponent(target)}`;
+    const response = await fetch(`${BASE_URL}/admin/placement/promote${query}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    if (!response.ok) {
+      const message = await response.text();
+      throw new Error(message || "Failed to promote placement");
+    }
+
+    return response.json();
+  }
+
+  async getBootstrapPlan(nodeUrl?: string): Promise<BootstrapPlan | null> {
+    const target = nodeUrl || this.seedUrl;
+    const query = `?node=${encodeURIComponent(target)}`;
+    const response = await fetch(`${BASE_URL}/admin/bootstrap${query}`);
+    if (!response.ok) {
+      throw new Error("Failed to fetch bootstrap state");
+    }
+    return response.json();
+  }
+
+  async startBootstrap(adminNodeUrl?: string): Promise<{ status: string; bootstrap: BootstrapPlan }> {
+    const target = adminNodeUrl || this.seedUrl;
+    const query = `?node=${encodeURIComponent(target)}`;
+    const response = await fetch(`${BASE_URL}/admin/bootstrap/start${query}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!response.ok) {
+      const message = await response.text()
+      throw new Error(message || "Failed to start bootstrap");
+    }
+    return response.json();
+  }
+
+  async completeBootstrap(adminNodeUrl?: string): Promise<{ status: string; bootstrap: BootstrapPlan }> {
+    const target = adminNodeUrl || this.seedUrl;
+    const query = `?node=${encodeURIComponent(target)}`;
+    const response = await fetch(`${BASE_URL}/admin/bootstrap/complete${query}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!response.ok) {
+      const message = await response.text()
+      throw new Error(message || "Failed to complete bootstrap");
+    }
     return response.json();
   }
 
