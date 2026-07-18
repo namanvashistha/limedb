@@ -1,3 +1,9 @@
+# Distinct project name so dev images (limedb-dev-nodeN, built from
+# Dockerfile.dev) never collide with the production images (limedb-nodeN,
+# built from Dockerfile). Without this, both compose files derive the same
+# image names from the directory and `up` silently reuses the wrong one.
+name: limedb-dev
+
 services:
   node1:
     build:

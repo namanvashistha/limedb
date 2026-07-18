@@ -1,0 +1,11 @@
+# Ephemeral override: publish each node's HTTP port to the host so the
+# limedb SDK (and hulk load tester) can hit them directly. Not committed.
+services:
+  node1:
+    ports: ["8484:8484"]
+  node2:
+    ports: ["8485:8484"]
+  node3:
+    ports: ["8486:8484"]
+  node4:
+    ports: ["8487:8484"]
