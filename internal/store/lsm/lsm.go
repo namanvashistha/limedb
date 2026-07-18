@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"limedb/internal/store"
 )
 
 // Store implements store.Backend using the LSM-Tree components:
@@ -117,16 +119,19 @@ func NewStore(cfg Config) (*Store, error) {
 }
 
 // Get implements store.Backend.
-func (s *Store) Get(key string) (string, bool) {
+// Returns ok=true even for tombstones — callers check .Tombstone.
+func (s *Store) Get(key string) (store.VersionedValue, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	return s.getLocked(key)
+}
 
-	// 1. Check MemTable.
-	if val, ok := s.mem.Get(key); ok {
-		return val, true
-	}
-	if s.mem.IsDeleted(key) {
-		return "", false // tombstone shadows disk
+// getLocked is the shared read path. Callers must hold s.mu (read or write).
+func (s *Store) getLocked(key string) (store.VersionedValue, bool) {
+	// 1. Check MemTable (always holds the newest version of a key,
+	//    including tombstones that shadow disk).
+	if v, ok := s.mem.Get(key); ok {
+		return v, true
 	}
 
 	// 2. Check SSTables (newest to oldest).
@@ -143,81 +148,48 @@ func (s *Store) Get(key string) (string, bool) {
 			bloomMayContain = true
 		}
 
-		val, found := table.Get(key)
+		v, found := table.Get(key)
 		if found {
 			if hasBloom && bloomMayContain {
 				atomic.AddUint64(&s.bloomTruePositives, 1)
 			}
-			return val, true
-		}
-		if table.IsTombstone(key) {
-			if hasBloom && bloomMayContain {
-				atomic.AddUint64(&s.bloomTruePositives, 1)
-			}
-			return "", false // tombstone shadows older SSTables
+			return v, true // a tombstone here shadows older SSTables too
 		}
 
-		// If bloomMayContain was true but we didn't find it or a tombstone, it's a false positive.
+		// If bloomMayContain was true but we didn't find the key, it's a false positive.
 		if hasBloom && bloomMayContain {
 			atomic.AddUint64(&s.bloomFalsePositives, 1)
 		}
 	}
 
-	return "", false
+	return store.VersionedValue{}, false
 }
 
-// Set implements store.Backend.
-func (s *Store) Set(key, value string) {
+// Put implements store.Backend. It applies LWW against the current version
+// of the key (memtable + SSTables) and only persists the write if it wins.
+// Deletes are Puts with Tombstone=true.
+func (s *Store) Put(key string, v store.VersionedValue) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if cur, ok := s.getLocked(key); ok && !store.Newer(v, cur) {
+		return false // an equal-or-newer version already exists
+	}
 
 	// 1. Write to WAL.
-	if err := s.wal.WriteSet(key, value); err != nil {
-		fmt.Fprintf(os.Stderr, "lsm: wal write error (Set): %v\n", err)
-		return
-	}
-
-	// 2. Apply to MemTable.
-	s.mem.Set(key, value)
-
-	// 3. Check flush threshold.
-	if s.mem.ApproximateSize() >= s.flushThreshold {
-		s.flushMemTable()
-	}
-}
-
-// Delete implements store.Backend.
-func (s *Store) Delete(key string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// We return `bool` (did the key exist before deleting?), which requires
-	// a look-up. In a pure write-optimised LSM, `Delete` is usually blind
-	// (just writes a tombstone), but since `store.Backend` requires a bool
-	// return, we emulate it.
-	// To avoid deadlocks since we hold mu.Lock, we do the check lock-free
-	// by directly calling internal methods using the existing RWMutex rules (or
-	// since we hold the exclusive lock we don't need read locks, but the
-	// methods take their own locks so we must drop ours to call public Get).
-	s.mu.Unlock()
-	_, existed := s.Get(key)
-	s.mu.Lock()
-
-	// 1. Write tombstone to WAL.
-	if err := s.wal.WriteDel(key); err != nil {
-		fmt.Fprintf(os.Stderr, "lsm: wal write error (Del): %v\n", err)
+	if err := s.wal.WritePut(key, v.Value, v.TimestampMicros, v.Tombstone); err != nil {
+		fmt.Fprintf(os.Stderr, "lsm: wal write error: %v\n", err)
 		return false
 	}
 
-	// 2. Write tombstone to MemTable.
-	s.mem.Delete(key)
+	// 2. Apply to MemTable.
+	s.mem.Put(key, v)
 
 	// 3. Check flush threshold.
 	if s.mem.ApproximateSize() >= s.flushThreshold {
 		s.flushMemTable()
 	}
-
-	return existed
+	return true
 }
 
 // ListKeys implements store.Backend.

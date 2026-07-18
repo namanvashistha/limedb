@@ -11,9 +11,10 @@ package lsm
 //
 //  1. DATA SECTION   — packed binary records, one per entry:
 //
-//       [4B key_len][4B val_len][1B flags][key_bytes][val_bytes]
+//       [4B key_len][4B val_len][1B flags][8B ts_micros][key_bytes][val_bytes]
 //
 //       flags bit 0: 1 = tombstone (deleted). When set, val_len is 0.
+//       ts_micros is the LWW write timestamp assigned by the coordinator.
 //
 //  2. INDEX SECTION  — sparse index (every indexInterval-th entry):
 //
@@ -37,11 +38,14 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"limedb/internal/store"
 )
 
 const (
 	// ssMagic is written in the footer so we can detect corrupt / truncated files.
-	ssMagic = uint64(0x4C696D65_53535401) // "LimeSST\x01"
+	// Version 2 added the per-record timestamp; v1 files are rejected.
+	ssMagic = uint64(0x4C696D65_53535402) // "LimeSST\x02"
 
 	// footerSize is the fixed size of the SSTable footer in bytes.
 	footerSize = 24 // 8 (index offset) + 8 (index count) + 8 (magic)
@@ -101,9 +105,9 @@ func (w *SSTableWriter) WriteEntry(e Entry) error {
 		valBytes = nil
 	}
 
-	// [4B key_len][4B val_len][1B flags][key_bytes][val_bytes]
+	// [4B key_len][4B val_len][1B flags][8B ts_micros][key_bytes][val_bytes]
 	keyBytes := []byte(e.Key)
-	n, err := writeRecord(w.f, keyBytes, valBytes, flags)
+	n, err := writeRecord(w.f, keyBytes, valBytes, flags, e.TimestampMicros)
 	if err != nil {
 		return fmt.Errorf("sstable: write entry %q: %w", e.Key, err)
 	}
@@ -190,7 +194,7 @@ func (r *SSTableReader) loadIndex() error {
 	magic := footer[2]
 
 	if magic != ssMagic {
-		return fmt.Errorf("sstable: bad magic 0x%X (corrupt or wrong format)", magic)
+		return fmt.Errorf("sstable: bad magic 0x%X — corrupt, truncated, or written by an incompatible LimeDB version (wipe the data dir and restart)", magic)
 	}
 
 	// Seek to index section.
@@ -218,27 +222,11 @@ func (r *SSTableReader) loadIndex() error {
 }
 
 // Get looks up key in the SSTable.
-// Returns (value, true) if found and not a tombstone.
-// Returns ("", false) if absent.
-// Returns (tombstone sentinel, true) — actually no: callers receive ("", false)
-// for tombstones, but IsTombstone lets compaction distinguish "not found" from
-// "found but deleted".
-func (r *SSTableReader) Get(key string) (string, bool) {
-	val, found, _ := r.get(key)
-	return val, found
-}
-
-// IsTombstone reports whether key is present as a tombstone in this SSTable.
-// This is used during compaction to decide whether to propagate or drop a record.
-func (r *SSTableReader) IsTombstone(key string) bool {
-	_, _, isTomb := r.get(key)
-	return isTomb
-}
-
-// get is the internal implementation that also exposes the tombstone flag.
-func (r *SSTableReader) get(key string) (value string, found bool, isTombstone bool) {
+// Returns (record, true) if the key is present, including tombstones —
+// callers check .Tombstone to distinguish a delete from a live value.
+func (r *SSTableReader) Get(key string) (store.VersionedValue, bool) {
 	if len(r.index) == 0 {
-		return "", false, false
+		return store.VersionedValue{}, false
 	}
 
 	// Binary search: find the last index entry whose key <= target key.
@@ -270,7 +258,7 @@ func (r *SSTableReader) get(key string) (value string, found bool, isTombstone b
 
 	// Linear scan from startOffset, stopping at endOffset.
 	if _, err := r.f.Seek(startOffset, io.SeekStart); err != nil {
-		return "", false, false
+		return store.VersionedValue{}, false
 	}
 
 	for {
@@ -281,23 +269,24 @@ func (r *SSTableReader) get(key string) (value string, found bool, isTombstone b
 			}
 		}
 
-		k, v, flags, err := readRecord(r.f)
+		k, v, flags, ts, err := readRecord(r.f)
 		if err != nil {
 			break
 		}
 
 		if k == key {
-			if flags&flagTombstone != 0 {
-				return "", false, true // tombstone
-			}
-			return v, true, false
+			return store.VersionedValue{
+				Value:           v,
+				TimestampMicros: ts,
+				Tombstone:       flags&flagTombstone != 0,
+			}, true
 		}
 		// Since data is sorted, if we've passed the target key, stop early.
 		if k > key {
 			break
 		}
 	}
-	return "", false, false
+	return store.VersionedValue{}, false
 }
 
 // Entries returns all entries in sorted order, including tombstones.
@@ -323,7 +312,7 @@ func (r *SSTableReader) Entries() ([]Entry, error) {
 		if cur >= indexOffset {
 			break
 		}
-		k, v, flags, err := readRecord(r.f)
+		k, v, flags, ts, err := readRecord(r.f)
 		if err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				break
@@ -331,9 +320,10 @@ func (r *SSTableReader) Entries() ([]Entry, error) {
 			return nil, err
 		}
 		entries = append(entries, Entry{
-			Key:     k,
-			Value:   v,
-			Deleted: flags&flagTombstone != 0,
+			Key:             k,
+			Value:           v,
+			TimestampMicros: ts,
+			Deleted:         flags&flagTombstone != 0,
 		})
 	}
 	return entries, nil
@@ -349,26 +339,18 @@ func (r *SSTableReader) Path() string { return r.path }
 
 // writeRecord encodes one record and writes it to w.
 // Returns the number of bytes written.
-func writeRecord(w io.Writer, key, val []byte, flags byte) (int, error) {
+func writeRecord(w io.Writer, key, val []byte, flags byte, tsMicros int64) (int, error) {
+	header := make([]byte, 0, 4+4+1+8)
+	header = binary.LittleEndian.AppendUint32(header, uint32(len(key)))
+	header = binary.LittleEndian.AppendUint32(header, uint32(len(val)))
+	header = append(header, flags)
+	header = binary.LittleEndian.AppendUint64(header, uint64(tsMicros))
+
 	total := 0
-
-	keyLen := uint32(len(key))
-	valLen := uint32(len(val))
-
-	if err := binary.Write(w, binary.LittleEndian, keyLen); err != nil {
-		return total, err
+	if n, err := w.Write(header); err != nil {
+		return total + n, err
 	}
-	total += 4
-
-	if err := binary.Write(w, binary.LittleEndian, valLen); err != nil {
-		return total, err
-	}
-	total += 4
-
-	if _, err := w.Write([]byte{flags}); err != nil {
-		return total, err
-	}
-	total++
+	total += len(header)
 
 	if _, err := w.Write(key); err != nil {
 		return total, err
@@ -386,33 +368,21 @@ func writeRecord(w io.Writer, key, val []byte, flags byte) (int, error) {
 }
 
 // readRecord decodes one record from r.
-func readRecord(r io.Reader) (key, value string, flags byte, err error) {
-	var keyLen, valLen uint32
-	if err = binary.Read(r, binary.LittleEndian, &keyLen); err != nil {
+func readRecord(r io.Reader) (key, value string, flags byte, tsMicros int64, err error) {
+	header := make([]byte, 4+4+1+8)
+	if _, err = io.ReadFull(r, header); err != nil {
 		return
 	}
-	if err = binary.Read(r, binary.LittleEndian, &valLen); err != nil {
-		return
-	}
+	keyLen := binary.LittleEndian.Uint32(header[0:4])
+	valLen := binary.LittleEndian.Uint32(header[4:8])
+	flags = header[8]
+	tsMicros = int64(binary.LittleEndian.Uint64(header[9:17]))
 
-	flagBuf := make([]byte, 1)
-	if _, err = io.ReadFull(r, flagBuf); err != nil {
+	kv := make([]byte, int(keyLen)+int(valLen))
+	if _, err = io.ReadFull(r, kv); err != nil {
 		return
 	}
-	flags = flagBuf[0]
-
-	keyBuf := make([]byte, keyLen)
-	if _, err = io.ReadFull(r, keyBuf); err != nil {
-		return
-	}
-	key = string(keyBuf)
-
-	if valLen > 0 {
-		valBuf := make([]byte, valLen)
-		if _, err = io.ReadFull(r, valBuf); err != nil {
-			return
-		}
-		value = string(valBuf)
-	}
+	key = string(kv[:keyLen])
+	value = string(kv[keyLen:])
 	return
 }

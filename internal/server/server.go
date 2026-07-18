@@ -10,6 +10,7 @@ import (
 	"limedb/internal/messenger"
 	"limedb/internal/node"
 	"limedb/internal/placement"
+	"limedb/internal/store"
 	"runtime"
 	"sync/atomic"
 	"time"
@@ -216,11 +217,10 @@ func (s *Server) router(ctx *fasthttp.RequestCtx) {
 		s.handleGossip(ctx)
 	case method == "GET" && len(path) > 17 && path[:17] == "/api/v1/replicas/":
 		s.handleReplicaInfo(ctx, path[17:])
-	// Internal node-to-node replication endpoints (local write only, no QUORUM re-replication)
+	// Internal node-to-node replication endpoint (local write only, no QUORUM
+	// re-replication). Deletes travel through here too, as tombstone writes.
 	case method == "POST" && path == "/internal/replicate":
 		s.handleInternalSet(ctx)
-	case method == "DELETE" && len(path) > 20 && path[:20] == "/internal/replicate/":
-		s.handleInternalDelete(ctx, path[20:])
 	default:
 		ctx.Error("Not Found", fasthttp.StatusNotFound)
 	}
@@ -295,22 +295,12 @@ func (s *Server) handleInternalSet(ctx *fasthttp.RequestCtx) {
 		ctx.Error("Invalid JSON", fasthttp.StatusBadRequest)
 		return
 	}
-	s.service.HandleReplicaWrite(req.Key, req.Value)
+	s.service.HandleReplicaWrite(req.Key, store.VersionedValue{
+		Value:           req.Value,
+		TimestampMicros: req.TimestampMicros,
+		Tombstone:       req.Tombstone,
+	})
 	ctx.SetBodyString("OK")
-}
-
-// handleInternalDelete is called by replica coordinators to delete locally without triggering QUORUM.
-func (s *Server) handleInternalDelete(ctx *fasthttp.RequestCtx, key string) {
-	if !isInternalRequest(ctx) {
-		ctx.Error("Forbidden", fasthttp.StatusForbidden)
-		return
-	}
-	deleted := s.service.HandleReplicaDelete(key)
-	if deleted {
-		ctx.SetBodyString("1")
-	} else {
-		ctx.SetBodyString("0")
-	}
 }
 
 // isInternalRequest returns true if the request originates from a private/loopback IP.
@@ -649,12 +639,12 @@ func (s *Server) handleListKeys(ctx *fasthttp.RequestCtx) {
 
 	keyInfos := make([]KeyInfo, 0, len(paginatedKeys))
 	for _, key := range paginatedKeys {
-		value, ok := store.Get(key)
-		if ok {
+		v, ok := store.Get(key)
+		if ok && !v.Tombstone {
 			keyInfos = append(keyInfos, KeyInfo{
 				Key:   key,
-				Value: value,
-				Size:  len(value),
+				Value: v.Value,
+				Size:  len(v.Value),
 			})
 		}
 	}

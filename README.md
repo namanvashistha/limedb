@@ -57,14 +57,19 @@ flowchart TD
 ### Store Backends — `internal/store/`
 | Backend | File | Behavior |
 |---|---|---|
+| `LSM` (active) | `lsm/` | LSM-tree engine: binary WAL (CRC-protected) → MemTable → SSTables with Bloom filters, size-tiered compaction |
 | `Memory` | `memory.go` | In-memory map, lost on restart |
 | `FileSystem` | `fsstore.go` | JSON file per node, strict disk read/write on every op, atomic rename on write |
 
-Active backend is injected at startup in `cmd/server/main.go`:
-```go
-// swap this line to change backend
-fsStore, _ := store.NewFileSystem(filepath.Join(cfg.DataDir, cfg.NodeUrl+".json"))
-```
+Every record carries a **last-write-wins (LWW) timestamp** assigned once by the
+coordinator that accepted the write. The timestamp travels through the WAL,
+SSTables, and replication messages, so replicas converge deterministically:
+higher timestamp wins; on an exact tie a tombstone beats a value. Deletes are
+replicated tombstones — an older value can never resurrect a deleted key.
+LWW uses wall clocks, so heavy clock skew between nodes can reorder
+conflicting writes (same tradeoff Cassandra makes).
+
+Active backend is injected at startup in `cmd/server/main.go`.
 
 ---
 
@@ -144,19 +149,15 @@ All endpoints exposed by every node on port `8484` (configurable).
 
 ---
 
-## Persistent Data (FileSystem store)
+## Persistent Data (LSM store)
 
-Each node writes `DATA_DIR/<NODE_URL>.json`. With `docker-compose.dev.yml`, `./data` is bind-mounted so files appear on your Mac:
+Each node writes to `DATA_DIR/<NODE_URL>_lsm/` — a WAL (`wal.log`), SSTables
+(`*.sst`), and Bloom filter sidecars (`*.bloom`).
 
-```
-./data/
-  http://node1:8484.json
-  http://node2:8484.json
-  http://node3:8484.json
-  http://node4:8484.json
-```
-
-Every `Set` / `Delete`: read full JSON from disk → mutate → atomic write via `rename(tmp, file)`.
+> **Upgrade note:** the WAL and SSTable formats changed when LWW timestamps
+> were introduced (binary WAL `LIMEWAL2`, SSTable footer v2). Data dirs
+> written by older versions are rejected at startup with a clear error —
+> wipe `DATA_DIR` and restart.
 
 ---
 
@@ -172,12 +173,24 @@ Features: node switcher, all-nodes fan-out, structured GET/SET/DEL query executo
 
 ---
 
+## Cluster Membership
+
+All peers listed in `NODE_PEERS` at startup form the **initial cluster** and
+auto-join the routing ring — list the full initial member set on every node
+(see `docker-compose.yml` / `run_go_cluster.sh`). Nodes added later are
+discovered via gossip but stay out of routing until an operator runs the
+admin activate → bootstrap → promote flow (`/api/v1/admin/membership/activate`
+etc.).
+
+---
+
 ## Known Limitations
 
-- **No key migration** on ring change: if gossip expands the ring after data was written, keys may route to a different node than where they are stored
-- **No replication**: each key exists on exactly one node
+- **No key migration yet** on ring change: bootstrap data streaming is planned; today a promoted node starts empty for its ranges
+- **Reads are consistency ONE**: first replica that answers wins; read repair and QUORUM reads are planned
+- **No hinted handoff**: a replica that misses a write catches up only when the key is written again with a newer timestamp
 - **Gossip adds nodes only**: dead nodes are not automatically removed from the ring
-- **FileSystem store**: O(n) per op (full JSON parse per read/write) — suitable for small datasets
+- **LWW wall-clock timestamps**: conflicting writes within clock-skew windows resolve by timestamp, not causality
 
 ---
 

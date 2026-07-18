@@ -33,20 +33,21 @@ func writeTestSSTable(t *testing.T, entries []Entry) *SSTableReader {
 	return r
 }
 
-// TestSSTable_BasicGetHit writes a few entries then looks each one up.
+// TestSSTable_BasicGetHit writes a few entries then looks each one up,
+// checking values and timestamps round-trip.
 func TestSSTable_BasicGetHit(t *testing.T) {
 	entries := []Entry{
-		{Key: "apple", Value: "red"},
-		{Key: "banana", Value: "yellow"},
-		{Key: "cherry", Value: "dark-red"},
-		{Key: "durian", Value: "spiky"},
+		{Key: "apple", Value: "red", TimestampMicros: 11},
+		{Key: "banana", Value: "yellow", TimestampMicros: 22},
+		{Key: "cherry", Value: "dark-red", TimestampMicros: 33},
+		{Key: "durian", Value: "spiky", TimestampMicros: 44},
 	}
 	r := writeTestSSTable(t, entries)
 
 	for _, e := range entries {
 		v, ok := r.Get(e.Key)
-		if !ok || v != e.Value {
-			t.Errorf("Get(%q): got (%q, %v), want (%q, true)", e.Key, v, ok, e.Value)
+		if !ok || v.Value != e.Value || v.TimestampMicros != e.TimestampMicros || v.Tombstone {
+			t.Errorf("Get(%q): got (%+v, %v), want (%q ts=%d, true)", e.Key, v, ok, e.Value, e.TimestampMicros)
 		}
 	}
 }
@@ -65,32 +66,31 @@ func TestSSTable_GetMiss(t *testing.T) {
 	}
 }
 
-// TestSSTable_Tombstone verifies that tombstoned keys return (false) from Get
-// but true from IsTombstone.
+// TestSSTable_Tombstone verifies that tombstoned keys are returned with the
+// Tombstone flag set (and their timestamp intact).
 func TestSSTable_Tombstone(t *testing.T) {
 	r := writeTestSSTable(t, []Entry{
-		{Key: "alive", Value: "yes"},
-		{Key: "dead", Deleted: true},
+		{Key: "alive", Value: "yes", TimestampMicros: 1},
+		{Key: "dead", Deleted: true, TimestampMicros: 2},
 	})
 
-	if _, ok := r.Get("dead"); ok {
-		t.Error("Get(tombstone key) should return false")
+	v, ok := r.Get("dead")
+	if !ok || !v.Tombstone || v.TimestampMicros != 2 {
+		t.Errorf("Get(dead): got (%+v, %v), want tombstone ts=2", v, ok)
 	}
-	if !r.IsTombstone("dead") {
-		t.Error("IsTombstone should return true for deleted entry")
-	}
-	if r.IsTombstone("alive") {
-		t.Error("IsTombstone should return false for live entry")
+	v, ok = r.Get("alive")
+	if !ok || v.Tombstone {
+		t.Errorf("Get(alive): got (%+v, %v), want live value", v, ok)
 	}
 }
 
 // TestSSTable_Entries verifies the full scan returns entries in order,
-// including tombstones.
+// including tombstones, with timestamps preserved.
 func TestSSTable_Entries(t *testing.T) {
 	src := []Entry{
-		{Key: "a", Value: "1"},
-		{Key: "b", Deleted: true},
-		{Key: "c", Value: "3"},
+		{Key: "a", Value: "1", TimestampMicros: 100},
+		{Key: "b", Deleted: true, TimestampMicros: 200},
+		{Key: "c", Value: "3", TimestampMicros: 300},
 	}
 	r := writeTestSSTable(t, src)
 
@@ -102,9 +102,8 @@ func TestSSTable_Entries(t *testing.T) {
 		t.Fatalf("len(Entries): got %d, want %d", len(got), len(src))
 	}
 	for i, e := range src {
-		if got[i].Key != e.Key || got[i].Deleted != e.Deleted {
-			t.Errorf("entry[%d]: got {%q,%v}, want {%q,%v}",
-				i, got[i].Key, got[i].Deleted, e.Key, e.Deleted)
+		if got[i].Key != e.Key || got[i].Deleted != e.Deleted || got[i].TimestampMicros != e.TimestampMicros {
+			t.Errorf("entry[%d]: got %+v, want %+v", i, got[i], e)
 		}
 	}
 }
@@ -117,8 +116,9 @@ func TestSSTable_SparseIndex(t *testing.T) {
 	entries := make([]Entry, n)
 	for i := range entries {
 		entries[i] = Entry{
-			Key:   fmt.Sprintf("key-%04d", i),
-			Value: fmt.Sprintf("val-%d", i),
+			Key:             fmt.Sprintf("key-%04d", i),
+			Value:           fmt.Sprintf("val-%d", i),
+			TimestampMicros: int64(i + 1),
 		}
 	}
 	r := writeTestSSTable(t, entries)
@@ -127,8 +127,8 @@ func TestSSTable_SparseIndex(t *testing.T) {
 	for _, i := range []int{0, 15, 16, 31, 32, n - 1} {
 		want := entries[i]
 		v, ok := r.Get(want.Key)
-		if !ok || v != want.Value {
-			t.Errorf("Get(%q): got (%q, %v), want (%q, true)", want.Key, v, ok, want.Value)
+		if !ok || v.Value != want.Value {
+			t.Errorf("Get(%q): got (%+v, %v), want (%q, true)", want.Key, v, ok, want.Value)
 		}
 	}
 }
@@ -137,10 +137,10 @@ func TestSSTable_SparseIndex(t *testing.T) {
 // MemTable → Entries() → SSTableWriter → SSTableReader.Get
 func TestSSTable_FlushFromMemTable(t *testing.T) {
 	m := NewMemTable()
-	m.Set("x", "10")
-	m.Set("y", "20")
-	m.Set("z", "30")
-	m.Delete("y")
+	m.Put("x", val("10"))
+	m.Put("y", val("20"))
+	m.Put("z", val("30"))
+	m.Put("y", tomb())
 
 	path := filepath.Join(t.TempDir(), "flush.sst")
 	w, err := NewSSTableWriter(path)
@@ -162,16 +162,13 @@ func TestSSTable_FlushFromMemTable(t *testing.T) {
 	}
 	defer r.Close()
 
-	if v, ok := r.Get("x"); !ok || v != "10" {
+	if v, ok := liveGet(r, "x"); !ok || v != "10" {
 		t.Errorf("x: got (%q, %v), want (10, true)", v, ok)
 	}
-	if _, ok := r.Get("y"); ok {
-		t.Error("y should be a tombstone, Get should return false")
+	if v, ok := r.Get("y"); !ok || !v.Tombstone {
+		t.Errorf("y should be a tombstone: got (%+v, %v)", v, ok)
 	}
-	if !r.IsTombstone("y") {
-		t.Error("y should be IsTombstone=true")
-	}
-	if v, ok := r.Get("z"); !ok || v != "30" {
+	if v, ok := liveGet(r, "z"); !ok || v != "30" {
 		t.Errorf("z: got (%q, %v), want (30, true)", v, ok)
 	}
 }

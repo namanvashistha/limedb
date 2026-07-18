@@ -17,11 +17,7 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Set the first node as the seed peer for all others
-SEED_PEER="http://localhost:${START_PORT}"
-
 echo -e "${GREEN}Starting ${NUM_NODES} nodes...${NC}"
-echo -e "Seed peer: ${SEED_PEER}"
 
 # Array to keep track of PIDs
 PIDS=()
@@ -39,22 +35,28 @@ cleanup() {
 # Trap SIGINT (Ctrl+C) and SIGTERM
 trap cleanup SIGINT SIGTERM
 
-# Start Nodes
+# Start Nodes. Every node gets the FULL initial member list as peers so the
+# whole initial cluster auto-joins the routing ring with an identical view.
+# Nodes added later (not in this list) are discovered via gossip and go
+# through the manual admin activate/bootstrap flow.
 for ((i=0; i<NUM_NODES; i++)); do
     PORT=$((START_PORT + i))
     NODE_URL="http://localhost:${PORT}"
-    
-    if [ $i -eq 0 ]; then
-        # First node starts without peers (seed node)
-        echo "Starting Seed Node at ${NODE_URL}..."
-        $BINARY_PATH -server.port $PORT -node.url "$NODE_URL" -node.routing.virtual-nodes 1 -otel.endpoint "" &
-    else
-        # Each node connects to the previous node
-        PREV_PORT=$((START_PORT + i - 1))
-        PREV_PEER="http://localhost:${PREV_PORT}"
-        echo "Starting Node at ${NODE_URL} with peer ${PREV_PEER}..."
-        $BINARY_PATH -server.port $PORT -node.url "$NODE_URL" -node.peers "$PREV_PEER"  -node.routing.virtual-nodes 1 -otel.endpoint "" &
-    fi
+
+    PEERS=""
+    for ((j=0; j<NUM_NODES; j++)); do
+        if [ $j -ne $i ]; then
+            PEER="http://localhost:$((START_PORT + j))"
+            if [ -z "$PEERS" ]; then
+                PEERS="$PEER"
+            else
+                PEERS="$PEERS,$PEER"
+            fi
+        fi
+    done
+
+    echo "Starting Node at ${NODE_URL} with peers ${PEERS}..."
+    $BINARY_PATH -server.port $PORT -node.url "$NODE_URL" -node.peers "$PEERS" -node.routing.virtual-nodes 1 -otel.endpoint "" &
     PIDS+=($!)
 done
 

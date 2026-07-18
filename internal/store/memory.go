@@ -1,56 +1,60 @@
 package store
 
-import "sync"
+import (
+	"sort"
+	"sync"
+)
 
-// Memory is a thread-safe in-memory key-value store backed by sync.Map.
+// Memory is a thread-safe in-memory key-value store.
+// Tombstones are kept in the map so LWW comparisons work after deletes.
 type Memory struct {
-	data sync.Map
+	mu   sync.RWMutex
+	data map[string]VersionedValue
 }
 
 // NewMemory creates a new in-memory store.
 func NewMemory() *Memory {
-	return &Memory{}
+	return &Memory{data: make(map[string]VersionedValue)}
 }
 
-func (s *Memory) Get(key string) (string, bool) {
-	val, ok := s.data.Load(key)
-	if !ok {
-		return "", false
+func (s *Memory) Get(key string) (VersionedValue, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := s.data[key]
+	return v, ok
+}
+
+func (s *Memory) Put(key string, v VersionedValue) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cur, ok := s.data[key]; ok && !Newer(v, cur) {
+		return false
 	}
-	return val.(string), true
-}
-
-func (s *Memory) Set(key, value string) {
-	s.data.Store(key, value)
-}
-
-func (s *Memory) Delete(key string) bool {
-	_, ok := s.data.LoadAndDelete(key)
-	return ok
+	s.data[key] = v
+	return true
 }
 
 func (s *Memory) ListKeys() []string {
-	keys := make([]string, 0)
-	s.data.Range(func(key, value interface{}) bool {
-		keys = append(keys, key.(string))
-		return true
-	})
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	keys := make([]string, 0, len(s.data))
+	for k, v := range s.data {
+		if !v.Tombstone {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
 	return keys
 }
 
 // Stats returns internal storage metrics.
-func (m *Memory) Stats() map[string]interface{} {
+func (s *Memory) Stats() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "memory",
-		"keys": m.Count(),
+		"keys": s.Count(),
 	}
 }
 
 func (s *Memory) Count() int {
-	count := 0
-	s.data.Range(func(key, value interface{}) bool {
-		count++
-		return true
-	})
-	return count
+	return len(s.ListKeys())
 }

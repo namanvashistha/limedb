@@ -4,19 +4,21 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+
+	"limedb/internal/store"
 )
 
-func TestMemTable_SetAndGet(t *testing.T) {
+func TestMemTable_PutAndGet(t *testing.T) {
 	m := NewMemTable()
 
-	m.Set("color", "lime")
-	m.Set("fruit", "mango")
-	m.Set("color", "green") // overwrite
+	m.Put("color", val("lime"))
+	m.Put("fruit", val("mango"))
+	m.Put("color", val("green")) // overwrite with newer timestamp
 
-	if v, ok := m.Get("color"); !ok || v != "green" {
+	if v, ok := liveGet(m, "color"); !ok || v != "green" {
 		t.Errorf("color: got (%q, %v), want (green, true)", v, ok)
 	}
-	if v, ok := m.Get("fruit"); !ok || v != "mango" {
+	if v, ok := liveGet(m, "fruit"); !ok || v != "mango" {
 		t.Errorf("fruit: got (%q, %v), want (mango, true)", v, ok)
 	}
 	if _, ok := m.Get("missing"); ok {
@@ -24,16 +26,51 @@ func TestMemTable_SetAndGet(t *testing.T) {
 	}
 }
 
+func TestMemTable_LWW_OlderWriteIgnored(t *testing.T) {
+	m := NewMemTable()
+
+	if !m.Put("k", store.VersionedValue{Value: "new", TimestampMicros: 100}) {
+		t.Fatal("first write should apply")
+	}
+	if m.Put("k", store.VersionedValue{Value: "stale", TimestampMicros: 50}) {
+		t.Error("older write should be rejected")
+	}
+	if v, _ := m.Get("k"); v.Value != "new" || v.TimestampMicros != 100 {
+		t.Errorf("got %+v, want the newer record", v)
+	}
+}
+
+func TestMemTable_LWW_TieBreaks(t *testing.T) {
+	m := NewMemTable()
+
+	// Exact-tie: tombstone beats value.
+	m.Put("k", store.VersionedValue{Value: "v", TimestampMicros: 10})
+	if !m.Put("k", store.VersionedValue{TimestampMicros: 10, Tombstone: true}) {
+		t.Error("tombstone should win a timestamp tie against a value")
+	}
+	// Value must not win back against the tombstone at the same timestamp.
+	if m.Put("k", store.VersionedValue{Value: "v", TimestampMicros: 10}) {
+		t.Error("value should not beat a tombstone at the same timestamp")
+	}
+
+	// Value-vs-value tie: lexically larger wins, deterministically.
+	m.Put("x", store.VersionedValue{Value: "aaa", TimestampMicros: 20})
+	if !m.Put("x", store.VersionedValue{Value: "bbb", TimestampMicros: 20}) {
+		t.Error("lexically larger value should win the tie")
+	}
+	if m.Put("x", store.VersionedValue{Value: "aaa", TimestampMicros: 20}) {
+		t.Error("lexically smaller value should lose the tie")
+	}
+}
+
 func TestMemTable_Delete_Tombstone(t *testing.T) {
 	m := NewMemTable()
-	m.Set("x", "hello")
-	m.Delete("x")
+	m.Put("x", val("hello"))
+	m.Put("x", tomb())
 
-	if _, ok := m.Get("x"); ok {
-		t.Error("Get after Delete should return false")
-	}
-	if !m.IsDeleted("x") {
-		t.Error("IsDeleted should return true after Delete")
+	v, ok := m.Get("x")
+	if !ok || !v.Tombstone {
+		t.Errorf("tombstone should be present and flagged: got (%+v, %v)", v, ok)
 	}
 	// Tombstone still makes Has() return true (needed for SSTable short-circuit).
 	if !m.Has("x") {
@@ -44,33 +81,30 @@ func TestMemTable_Delete_Tombstone(t *testing.T) {
 func TestMemTable_DeleteNeverWritten(t *testing.T) {
 	m := NewMemTable()
 	// Deleting a key that was never written should still write a tombstone.
-	m.Delete("ghost")
-	if !m.IsDeleted("ghost") {
-		t.Error("IsDeleted should be true even for never-written key")
+	m.Put("ghost", tomb())
+	if v, ok := m.Get("ghost"); !ok || !v.Tombstone {
+		t.Error("tombstone should exist even for never-written key")
 	}
 }
 
 func TestMemTable_SetAfterDelete(t *testing.T) {
 	m := NewMemTable()
-	m.Set("k", "v1")
-	m.Delete("k")
-	m.Set("k", "v2") // resurrection
+	m.Put("k", val("v1"))
+	m.Put("k", tomb())
+	m.Put("k", val("v2")) // resurrection with a newer timestamp
 
 	v, ok := m.Get("k")
-	if !ok || v != "v2" {
-		t.Errorf("after resurrection: got (%q, %v), want (v2, true)", v, ok)
-	}
-	if m.IsDeleted("k") {
-		t.Error("key should not be deleted after Set")
+	if !ok || v.Tombstone || v.Value != "v2" {
+		t.Errorf("after resurrection: got (%+v, %v), want v2", v, ok)
 	}
 }
 
 func TestMemTable_Entries_SortedAndTombstones(t *testing.T) {
 	m := NewMemTable()
-	m.Set("banana", "yellow")
-	m.Set("apple", "red")
-	m.Set("cherry", "dark")
-	m.Delete("apple")
+	m.Put("banana", val("yellow"))
+	m.Put("apple", val("red"))
+	m.Put("cherry", val("dark"))
+	m.Put("apple", tomb())
 
 	entries := m.Entries()
 	if len(entries) != 3 {
@@ -83,9 +117,12 @@ func TestMemTable_Entries_SortedAndTombstones(t *testing.T) {
 		t.Errorf("wrong order: %v", keys)
 	}
 
-	// apple should be flagged as deleted.
+	// apple should be flagged as deleted, with its timestamp preserved.
 	if !entries[0].Deleted {
 		t.Error("apple entry should be Deleted=true")
+	}
+	if entries[0].TimestampMicros == 0 {
+		t.Error("tombstone entry should carry its timestamp")
 	}
 	if entries[1].Deleted || entries[2].Deleted {
 		t.Error("banana/cherry should not be Deleted")
@@ -98,13 +135,13 @@ func TestMemTable_ApproximateSize(t *testing.T) {
 		t.Errorf("empty size should be 0, got %d", m.ApproximateSize())
 	}
 
-	m.Set("foo", "bar") // +3+3 = 6
+	m.Put("foo", val("bar")) // +3+3 = 6
 	if m.ApproximateSize() < 6 {
 		t.Errorf("size should be >= 6, got %d", m.ApproximateSize())
 	}
 
 	prev := m.ApproximateSize()
-	m.Set("foo", "longervalue") // value grows
+	m.Put("foo", val("longervalue")) // value grows
 	if m.ApproximateSize() <= prev {
 		t.Error("size should grow when value is replaced with a longer one")
 	}
@@ -112,22 +149,22 @@ func TestMemTable_ApproximateSize(t *testing.T) {
 
 func TestMemTable_RestoreFromWAL(t *testing.T) {
 	records := []Record{
-		{Op: OpSet, Key: "a", Value: "1"},
-		{Op: OpSet, Key: "b", Value: "2"},
-		{Op: OpDel, Key: "a"},
-		{Op: OpSet, Key: "c", Value: "3"},
+		{Op: OpSet, Key: "a", Value: "1", TimestampMicros: 1},
+		{Op: OpSet, Key: "b", Value: "2", TimestampMicros: 2},
+		{Op: OpDel, Key: "a", TimestampMicros: 3},
+		{Op: OpSet, Key: "c", Value: "3", TimestampMicros: 4},
 	}
 
 	m := NewMemTable()
 	m.RestoreFromWAL(records)
 
-	if _, ok := m.Get("a"); ok {
-		t.Error("a should be deleted after WAL replay")
+	if v, ok := liveGet(m, "a"); ok {
+		t.Errorf("a should be deleted after WAL replay, got %q", v)
 	}
-	if v, ok := m.Get("b"); !ok || v != "2" {
+	if v, ok := liveGet(m, "b"); !ok || v != "2" {
 		t.Errorf("b: got (%q, %v), want (2, true)", v, ok)
 	}
-	if v, ok := m.Get("c"); !ok || v != "3" {
+	if v, ok := liveGet(m, "c"); !ok || v != "3" {
 		t.Errorf("c: got (%q, %v), want (3, true)", v, ok)
 	}
 	if m.Len() != 3 { // a (tombstone) + b + c
@@ -145,7 +182,7 @@ func TestMemTable_Concurrent(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			for j := 0; j < 100; j++ {
-				m.Set(fmt.Sprintf("key-%d-%d", id, j), fmt.Sprintf("v%d", j))
+				m.Put(fmt.Sprintf("key-%d-%d", id, j), val(fmt.Sprintf("v%d", j)))
 			}
 		}(i)
 	}

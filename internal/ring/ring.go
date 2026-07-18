@@ -95,7 +95,6 @@ func (r *ConsistentHashRing) GetNode(key string) string {
 	}
 
 	h := r.hash(key)
-	fmt.Println(h)
 
 	// Binary search for the first node with hash >= h
 	idx := sort.Search(len(r.sortedHashes), func(i int) bool {
@@ -278,6 +277,12 @@ func (r *ConsistentHashRing) GetNodeRangesDegrees() map[string][]map[string]inte
 	}
 
 	return nodeRanges
+}
+
+// HashKey exposes the ring's key-hash function so other layers (e.g. token
+// range streaming during bootstrap) can compute the exact same token for a key.
+func HashKey(key string) uint64 {
+	return xxhash.Sum64String(key)
 }
 
 func (r *ConsistentHashRing) hash(key string) uint64 {

@@ -143,9 +143,9 @@ func TestBloom_IntegrationWithSSTable(t *testing.T) {
 	m := NewMemTable()
 	const n = 50
 	for i := 0; i < n; i++ {
-		m.Set(fmt.Sprintf("item-%02d", i), fmt.Sprintf("v%d", i))
+		m.Put(fmt.Sprintf("item-%02d", i), val(fmt.Sprintf("v%d", i)))
 	}
-	m.Delete("item-05") // tombstone
+	m.Put("item-05", tomb()) // tombstone
 
 	entries := m.Entries()
 	sstPath := filepath.Join(t.TempDir(), "0001.sst")

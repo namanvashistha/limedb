@@ -13,14 +13,19 @@ import (
 
 // GetResponse represents the JSON response for a GET request.
 type GetResponse struct {
-	Value   string `json:"value"`
-	NodeUrl string `json:"nodeUrl"`
+	Value           string `json:"value"`
+	TimestampMicros int64  `json:"timestamp_micros"`
+	NodeUrl         string `json:"nodeUrl"`
 }
 
-// SetRequest represents the JSON body for a SET request.
+// SetRequest represents the JSON body for a SET request. The same struct is
+// the body of /internal/replicate, where the coordinator-assigned timestamp
+// and tombstone flag travel with the value (clients never set those fields).
 type SetRequest struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
+	Key             string `json:"key"`
+	Value           string `json:"value"`
+	TimestampMicros int64  `json:"timestamp_micros,omitempty"`
+	Tombstone       bool   `json:"tombstone,omitempty"`
 }
 
 // WriteResponse tracks the result of a write to a single replica
@@ -124,8 +129,8 @@ func (s *NodeService) GetReplicaInfo(key string) *ReplicaInfo {
 		go func(idx int, nodeUrl string) {
 			has := false
 			if nodeUrl == s.currentNodeUrl {
-				_, ok := s.store.Get(key)
-				has = ok
+				v, ok := s.store.Get(key)
+				has = ok && !v.Tombstone
 			} else {
 				// HEAD-style: try to GET and check if it returns a value
 				result, err := s.forwardGet(nodeUrl, key)
@@ -168,10 +173,14 @@ func (s *NodeService) HandleGet(key string) (*GetResponse, error) {
 		replica := replicaTarget.NodeURL
 		if replica == s.currentNodeUrl {
 			// Local read
-			val, ok := s.store.Get(key)
+			v, ok := s.store.Get(key)
 			if ok {
+				if v.Tombstone {
+					// The key was deleted; the tombstone is authoritative here.
+					return nil, fmt.Errorf("key not found on any replica")
+				}
 				logger.Info("Get ONE (local)", "key", key)
-				return &GetResponse{Value: val, NodeUrl: s.currentNodeUrl}, nil
+				return &GetResponse{Value: v.Value, TimestampMicros: v.TimestampMicros, NodeUrl: s.currentNodeUrl}, nil
 			}
 		} else {
 			// Remote read
@@ -188,8 +197,28 @@ func (s *NodeService) HandleGet(key string) (*GetResponse, error) {
 }
 
 // HandleSet handles a SET request with QUORUM consistency.
-// Writes to all replicas in parallel and returns success once QUORUM acks received.
+// The coordinator assigns the LWW timestamp exactly once; every replica
+// (including the local store) applies the same versioned value.
 func (s *NodeService) HandleSet(key, value string) error {
+	return s.writeQuorum(key, store.VersionedValue{
+		Value:           value,
+		TimestampMicros: time.Now().UnixMicro(),
+	})
+}
+
+// HandleDelete handles a DELETE request with QUORUM consistency.
+// A delete is a replicated tombstone write with a coordinator timestamp, so
+// it wins over any older value that resurfaces from a lagging replica.
+func (s *NodeService) HandleDelete(key string) (bool, error) {
+	err := s.writeQuorum(key, store.VersionedValue{
+		TimestampMicros: time.Now().UnixMicro(),
+		Tombstone:       true,
+	})
+	return err == nil, err
+}
+
+// writeQuorum writes v to all replicas in parallel and returns once QUORUM acks.
+func (s *NodeService) writeQuorum(key string, v store.VersionedValue) error {
 	replicaSet := s.placement.ResolveReplicas(key)
 	replicas := make([]string, 0, len(replicaSet.Replicas))
 	for _, replica := range replicaSet.Replicas {
@@ -206,11 +235,11 @@ func (s *NodeService) HandleSet(key, value string) error {
 		go func(nodeUrl string) {
 			if nodeUrl == s.currentNodeUrl {
 				// Local write
-				s.store.Set(key, value)
+				s.store.Put(key, v)
 				responsesChan <- WriteResponse{NodeUrl: nodeUrl, Success: true}
 			} else {
 				// Remote write via HTTP
-				err := s.forwardSet(nodeUrl, key, value)
+				err := s.forwardSet(nodeUrl, key, v)
 				success := err == nil
 				errMsg := ""
 				if err != nil {
@@ -239,15 +268,10 @@ func (s *NodeService) HandleSet(key, value string) error {
 
 		// Early return once QUORUM reached (durability guarantee)
 		if successCount >= quorum {
-			logger.Info("Write QUORUM reached", "key", key, "rf", s.replicationFactor, "quorum", quorum, "acked", successCount)
+			logger.Info("Write QUORUM reached", "key", key, "rf", s.replicationFactor, "quorum", quorum, "acked", successCount, "tombstone", v.Tombstone)
 			// Note: Remaining replicas will continue writing asynchronously in background
 			return nil
 		}
-	}
-
-	// All replicas responded but QUORUM not reached
-	if successCount >= quorum {
-		return nil
 	}
 
 	errMsg := fmt.Sprintf("write failed: only %d/%d replicas acked (quorum=%d)", successCount, len(replicas), quorum)
@@ -256,65 +280,6 @@ func (s *NodeService) HandleSet(key, value string) error {
 	}
 	logger.Warn("Write QUORUM failed", "key", key, "acked", successCount, "required", quorum, "rf", s.replicationFactor)
 	return fmt.Errorf("%s", errMsg)
-}
-
-// HandleDelete handles a DELETE request with QUORUM consistency.
-func (s *NodeService) HandleDelete(key string) (bool, error) {
-	replicaSet := s.placement.ResolveReplicas(key)
-	replicas := make([]string, 0, len(replicaSet.Replicas))
-	for _, replica := range replicaSet.Replicas {
-		replicas = append(replicas, replica.NodeURL)
-	}
-
-	// Calculate QUORUM: ceil(RF/2) + 1
-	quorum := (s.replicationFactor / 2) + 1
-
-	// Delete from all replicas concurrently
-	responsesChan := make(chan WriteResponse, len(replicas))
-
-	for _, replica := range replicas {
-		go func(nodeUrl string) {
-			if nodeUrl == s.currentNodeUrl {
-				// Local delete
-				success := s.store.Delete(key)
-				responsesChan <- WriteResponse{NodeUrl: nodeUrl, Success: success}
-			} else {
-				// Remote delete via HTTP
-				success, err := s.forwardDelete(nodeUrl, key)
-				errMsg := ""
-				if err != nil {
-					errMsg = err.Error()
-				}
-				responsesChan <- WriteResponse{
-					NodeUrl: nodeUrl,
-					Success: success,
-					Error:   errMsg,
-				}
-			}
-		}(replica)
-	}
-
-	// Collect responses until QUORUM reached
-	successCount := 0
-
-	for i := 0; i < len(replicas); i++ {
-		resp := <-responsesChan
-		if resp.Success {
-			successCount++
-		}
-
-		// Early return once QUORUM reached
-		if successCount >= quorum {
-			logger.Info("Delete QUORUM reached", "key", key, "quorum", quorum, "acked", successCount)
-			return true, nil
-		}
-	}
-
-	if successCount >= quorum {
-		return true, nil
-	}
-
-	return false, fmt.Errorf("delete failed: only %d/%d replicas acked (quorum=%d)", successCount, len(replicas), quorum)
 }
 
 // forwardGet forwards a GET request to a peer.
@@ -344,8 +309,9 @@ func (s *NodeService) forwardGet(targetUrl, key string) (*GetResponse, error) {
 	return &result, nil
 }
 
-// forwardSet forwards a SET request to a peer's internal replica endpoint (local write only, no re-replication).
-func (s *NodeService) forwardSet(targetUrl, key, value string) error {
+// forwardSet forwards a versioned write (value or tombstone) to a peer's
+// internal replica endpoint (local write only, no re-replication).
+func (s *NodeService) forwardSet(targetUrl, key string, v store.VersionedValue) error {
 	url := fmt.Sprintf("%s/internal/replicate", targetUrl)
 
 	req := fasthttp.AcquireRequest()
@@ -357,7 +323,7 @@ func (s *NodeService) forwardSet(targetUrl, key, value string) error {
 	req.Header.SetMethod(fasthttp.MethodPost)
 	req.Header.SetContentType("application/json")
 
-	body := SetRequest{Key: key, Value: value}
+	body := SetRequest{Key: key, Value: v.Value, TimestampMicros: v.TimestampMicros, Tombstone: v.Tombstone}
 	bodyBytes, _ := json.Marshal(body)
 	req.SetBody(bodyBytes)
 
@@ -371,38 +337,11 @@ func (s *NodeService) forwardSet(targetUrl, key, value string) error {
 	return nil
 }
 
-// forwardDelete forwards a DELETE request to a peer's internal replica endpoint (local delete only, no re-replication).
-func (s *NodeService) forwardDelete(targetUrl, key string) (bool, error) {
-	url := fmt.Sprintf("%s/internal/replicate/%s", targetUrl, key)
-
-	req := fasthttp.AcquireRequest()
-	resp := fasthttp.AcquireResponse()
-	defer fasthttp.ReleaseRequest(req)
-	defer fasthttp.ReleaseResponse(resp)
-
-	req.SetRequestURI(url)
-	req.Header.SetMethod(fasthttp.MethodDelete)
-
-	if err := s.client.DoTimeout(req, resp, 2*time.Second); err != nil {
-		return false, err
-	}
-
-	if resp.StatusCode() != fasthttp.StatusOK {
-		return false, fmt.Errorf("peer returned status %d", resp.StatusCode())
-	}
-
-	return string(resp.Body()) == "1", nil
-}
-
-// HandleReplicaWrite writes a key directly to local storage without triggering replication.
-// This is called by the coordinator node when forwarding to replicas — prevents recursive replication.
-func (s *NodeService) HandleReplicaWrite(key, value string) {
-	s.store.Set(key, value)
-	logger.Info("Replica write (local)", "key", key)
-}
-
-// HandleReplicaDelete deletes a key directly from local storage without triggering replication.
-func (s *NodeService) HandleReplicaDelete(key string) bool {
-	logger.Info("Replica delete (local)", "key", key)
-	return s.store.Delete(key)
+// HandleReplicaWrite applies a versioned write directly to local storage
+// without triggering replication. This is called by the coordinator node when
+// forwarding to replicas — prevents recursive replication. LWW in the store
+// makes it safe to apply late or duplicate deliveries.
+func (s *NodeService) HandleReplicaWrite(key string, v store.VersionedValue) {
+	applied := s.store.Put(key, v)
+	logger.Info("Replica write (local)", "key", key, "applied", applied, "tombstone", v.Tombstone)
 }

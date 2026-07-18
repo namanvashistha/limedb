@@ -3,17 +3,17 @@ package lsm
 import (
 	"sort"
 	"sync"
+
+	"limedb/internal/store"
 )
 
-// tombstone is the special sentinel value stored for deleted keys.
-// It is unexported so callers never have to know about it.
-const tombstone = "\x00__tombstone__\x00"
-
 // entry holds a single key-value pair in the MemTable.
-// deletions are represented by value == tombstone.
+// Deletions are represented as tombstones (deleted=true, value="").
 type entry struct {
-	key   string
-	value string
+	key     string
+	value   string
+	ts      int64 // LWW timestamp in microseconds
+	deleted bool
 }
 
 // MemTable is a thread-safe, size-bounded in-memory store.
@@ -37,64 +37,47 @@ func NewMemTable() *MemTable {
 	return &MemTable{}
 }
 
-// Set inserts or updates key with value.
-// If the key previously held a tombstone (deleted) it is overwritten.
-func (m *MemTable) Set(key, value string) {
+// Put inserts or updates key with the given versioned value, applying LWW:
+// if an existing entry is newer, the write is dropped. Returns whether the
+// write was applied. Tombstones are stored like any other entry so that a
+// deleted key is not "resurrected" by an older version living in an SSTable.
+func (m *MemTable) Put(key string, v store.VersionedValue) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	idx, found := m.search(key)
 	if found {
-		old := m.entries[idx].value
-		m.sizeB -= int64(len(old))
-		m.entries[idx].value = value
-		m.sizeB += int64(len(value))
-		return
+		cur := m.entries[idx]
+		if !store.Newer(v, store.VersionedValue{Value: cur.value, TimestampMicros: cur.ts, Tombstone: cur.deleted}) {
+			return false
+		}
+		m.sizeB -= int64(len(cur.value))
+		m.entries[idx].value = v.Value
+		m.entries[idx].ts = v.TimestampMicros
+		m.entries[idx].deleted = v.Tombstone
+		m.sizeB += int64(len(v.Value))
+		return true
 	}
 	// Insert at sorted position.
 	m.entries = append(m.entries, entry{})
 	copy(m.entries[idx+1:], m.entries[idx:])
-	m.entries[idx] = entry{key: key, value: value}
-	m.sizeB += int64(len(key) + len(value))
+	m.entries[idx] = entry{key: key, value: v.Value, ts: v.TimestampMicros, deleted: v.Tombstone}
+	m.sizeB += int64(len(key) + len(v.Value))
+	return true
 }
 
-// Delete marks key as deleted by writing a tombstone.
-// Tombstones are necessary so that a key deleted from the MemTable is not
-// "resurrected" by an older version living in an SSTable on disk.
-func (m *MemTable) Delete(key string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	idx, found := m.search(key)
-	if found {
-		old := m.entries[idx].value
-		m.sizeB -= int64(len(old))
-		m.entries[idx].value = tombstone
-		m.sizeB += int64(len(tombstone))
-		return
-	}
-	// Key not present — write a tombstone anyway so SSTables can be skipped.
-	m.entries = append(m.entries, entry{})
-	copy(m.entries[idx+1:], m.entries[idx:])
-	m.entries[idx] = entry{key: key, value: tombstone}
-	m.sizeB += int64(len(key) + len(tombstone))
-}
-
-// Get returns (value, true) if the key exists and has not been deleted.
-// Returns ("", false) if the key is absent or has a tombstone.
-func (m *MemTable) Get(key string) (string, bool) {
+// Get returns (value, true) if the key is present, including tombstones —
+// callers check .Tombstone to distinguish a delete from a live value.
+func (m *MemTable) Get(key string) (store.VersionedValue, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	idx, found := m.search(key)
 	if !found {
-		return "", false
+		return store.VersionedValue{}, false
 	}
-	v := m.entries[idx].value
-	if v == tombstone {
-		return "", false // deleted
-	}
-	return v, true
+	e := m.entries[idx]
+	return store.VersionedValue{Value: e.value, TimestampMicros: e.ts, Tombstone: e.deleted}, true
 }
 
 // Has returns true if the key is present in the MemTable, even if it is a
@@ -106,17 +89,6 @@ func (m *MemTable) Has(key string) bool {
 	return found
 }
 
-// IsDeleted reports whether key carries a tombstone in this MemTable.
-func (m *MemTable) IsDeleted(key string) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	idx, found := m.search(key)
-	if !found {
-		return false
-	}
-	return m.entries[idx].value == tombstone
-}
-
 // Entries returns a snapshot of all entries (including tombstones) in sorted
 // key order.  This is the data that gets flushed to an SSTable.
 func (m *MemTable) Entries() []Entry {
@@ -126,9 +98,10 @@ func (m *MemTable) Entries() []Entry {
 	out := make([]Entry, len(m.entries))
 	for i, e := range m.entries {
 		out[i] = Entry{
-			Key:     e.key,
-			Value:   e.value,
-			Deleted: e.value == tombstone,
+			Key:             e.key,
+			Value:           e.value,
+			TimestampMicros: e.ts,
+			Deleted:         e.deleted,
 		}
 	}
 	return out
@@ -166,18 +139,18 @@ func (m *MemTable) search(key string) (int, bool) {
 // to this MemTable. Call this once at startup before accepting new writes.
 func (m *MemTable) RestoreFromWAL(records []Record) {
 	for _, r := range records {
-		switch r.Op {
-		case OpSet:
-			m.Set(r.Key, r.Value)
-		case OpDel:
-			m.Delete(r.Key)
-		}
+		m.Put(r.Key, store.VersionedValue{
+			Value:           r.Value,
+			TimestampMicros: r.TimestampMicros,
+			Tombstone:       r.Op == OpDel,
+		})
 	}
 }
 
 // Entry is a public view of a single MemTable entry used during SSTable flush.
 type Entry struct {
-	Key     string
-	Value   string
-	Deleted bool // true if this entry is a tombstone
+	Key             string
+	Value           string
+	TimestampMicros int64
+	Deleted         bool // true if this entry is a tombstone
 }

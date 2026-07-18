@@ -85,6 +85,46 @@ func TestMerge_NewestWins(t *testing.T) {
 	check(2, "c", "new-c")
 }
 
+// TestMerge_HigherTimestampWins verifies that on a key collision the record
+// with the higher LWW timestamp wins even when it lives in the older table
+// (e.g. a late replica write applied after a flush).
+func TestMerge_HigherTimestampWins(t *testing.T) {
+	dir := t.TempDir()
+
+	newerTable := makeSSTable(t, dir, "t1", []Entry{
+		{Key: "a", Value: "flushed-later", TimestampMicros: 100},
+	})
+	olderTable := makeSSTable(t, dir, "t2", []Entry{
+		{Key: "a", Value: "written-later", TimestampMicros: 200},
+	})
+
+	out := filepath.Join(dir, "merged.sst")
+	if err := MergeSSTables([]string{newerTable, olderTable}, out, MergeOptions{}); err != nil {
+		t.Fatalf("MergeSSTables: %v", err)
+	}
+
+	entries := readAll(t, out)
+	if len(entries) != 1 || entries[0].Value != "written-later" || entries[0].TimestampMicros != 200 {
+		t.Errorf("merge should keep the higher-timestamp record: got %+v", entries)
+	}
+
+	// A newer tombstone must also beat an older value across tables.
+	tombTable := makeSSTable(t, dir, "t3", []Entry{
+		{Key: "b", Deleted: true, TimestampMicros: 300},
+	})
+	valTable := makeSSTable(t, dir, "t4", []Entry{
+		{Key: "b", Value: "zombie", TimestampMicros: 250},
+	})
+	out2 := filepath.Join(dir, "merged2.sst")
+	if err := MergeSSTables([]string{valTable, tombTable}, out2, MergeOptions{}); err != nil {
+		t.Fatalf("MergeSSTables: %v", err)
+	}
+	entries = readAll(t, out2)
+	if len(entries) != 1 || !entries[0].Deleted {
+		t.Errorf("newer tombstone should win: got %+v", entries)
+	}
+}
+
 // TestMerge_TombstonePreservedByDefault verifies tombstones are kept when
 // DropTombstones=false.
 func TestMerge_TombstonePreservedByDefault(t *testing.T) {

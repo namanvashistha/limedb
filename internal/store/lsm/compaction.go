@@ -15,7 +15,8 @@ package lsm
 //   This is the same strategy Cassandra uses at L0.
 //
 // Merge rules (newest-wins):
-//   • Inputs are passed newest → oldest.  The first occurrence of a key wins.
+//   • On a key collision the record with the higher LWW timestamp wins,
+//     falling back to table recency (inputs are passed newest → oldest).
 //   • Tombstones are preserved unless DropTombstones=true, which is only safe
 //     when ALL SSTables in the engine are being compacted in one pass (nothing
 //     older can be "underneath" the tombstone).
@@ -155,8 +156,12 @@ func (h mergeHeap) Less(i, j int) bool {
 	if h[i].entry.Key != h[j].entry.Key {
 		return h[i].entry.Key < h[j].entry.Key
 	}
-	// Same key: lower priority number (=newer) wins; it goes first so we emit
-	// it and then skip all older duplicates.
+	// Same key: the record with the higher LWW timestamp wins; it goes first
+	// so we emit it and then skip all older duplicates. Fall back to table
+	// recency (lower priority = newer table) when timestamps tie.
+	if h[i].entry.TimestampMicros != h[j].entry.TimestampMicros {
+		return h[i].entry.TimestampMicros > h[j].entry.TimestampMicros
+	}
 	return h[i].priority < h[j].priority
 }
 func (h *mergeHeap) Push(x interface{}) { *h = append(*h, x.(mergeItem)) }

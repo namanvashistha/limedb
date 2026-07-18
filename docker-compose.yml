@@ -9,7 +9,9 @@ services:
     environment:
       - SERVER_PORT=8484
       - NODE_URL=http://node1:8484
-      - NODE_PEERS=http://node2:8484
+      # Full initial member list: all listed peers auto-join the routing ring
+      # at boot. Nodes added later join via the admin activate/bootstrap flow.
+      - NODE_PEERS=http://node2:8484,http://node3:8484,http://node4:8484
       - DATA_DIR=/data
 
   node2:
@@ -20,7 +22,7 @@ services:
     environment:
       - SERVER_PORT=8484
       - NODE_URL=http://node2:8484
-      - NODE_PEERS=http://node3:8484
+      - NODE_PEERS=http://node1:8484,http://node3:8484,http://node4:8484
       - DATA_DIR=/data
 
   node3:
@@ -31,7 +33,7 @@ services:
     environment:
       - SERVER_PORT=8484
       - NODE_URL=http://node3:8484
-      - NODE_PEERS=http://node4:8484
+      - NODE_PEERS=http://node1:8484,http://node2:8484,http://node4:8484
       - DATA_DIR=/data
 
   node4:
@@ -42,7 +44,7 @@ services:
     environment:
       - SERVER_PORT=8484
       - NODE_URL=http://node4:8484
-      - NODE_PEERS=http://node1:8484
+      - NODE_PEERS=http://node1:8484,http://node2:8484,http://node3:8484
       - DATA_DIR=/data
 
   web:
