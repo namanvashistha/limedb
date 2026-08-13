@@ -29,6 +29,12 @@ services:
       # at boot. Nodes added later join via the admin activate/bootstrap flow.
       - NODE_PEERS=http://node2:8484,http://node3:8484,http://node4:8484
       - DATA_DIR=/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:8484/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   node2:
     image: ghcr.io/namanvashistha/limedb:latest
@@ -40,6 +46,12 @@ services:
       - NODE_URL=http://node2:8484
       - NODE_PEERS=http://node1:8484,http://node3:8484,http://node4:8484
       - DATA_DIR=/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:8484/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   node3:
     image: ghcr.io/namanvashistha/limedb:latest
@@ -51,6 +63,12 @@ services:
       - NODE_URL=http://node3:8484
       - NODE_PEERS=http://node1:8484,http://node2:8484,http://node4:8484
       - DATA_DIR=/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:8484/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   node4:
     image: ghcr.io/namanvashistha/limedb:latest
@@ -62,6 +80,12 @@ services:
       - NODE_URL=http://node4:8484
       - NODE_PEERS=http://node1:8484,http://node2:8484,http://node3:8484
       - DATA_DIR=/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:8484/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   web:
     # Second image: the repo builds ./web from its own Dockerfile, so its CI
@@ -80,6 +104,12 @@ services:
     labels:
       caddy: http://limedb.namanvashistha.com
       caddy.reverse_proxy: "{{upstreams 3000}}"
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
 networks:
   caddy:
